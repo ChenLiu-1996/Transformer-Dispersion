@@ -32,23 +32,22 @@ def organize_embeddings(embeddings: List[torch.Tensor]) -> List[np.ndarray]:
 def plot_DSE(embeddings_by_layer: List[np.ndarray], save_path: str = None):
     fig = plt.figure(figsize=(12, 8))
     ax = fig.add_subplot(1, 1, 1)
-    for sigma, color_base in zip([1, 5, 20], ['Blues', 'Reds', 'Greens']):
+    for sigma, color_base in zip([1, 5, 10], ['Blues', 'Reds', 'Greens']):
         cmap = plt.get_cmap(color_base)
         for diffusion_t, cmap_idx in zip([1, 2, 5, 10], [0.4, 0.6, 0.8, 1.0]):
             entropy_arr = [diffusion_spectral_entropy(embeddings, gaussian_kernel_sigma=sigma, t=diffusion_t)
                         for embeddings in embeddings_by_layer]
             ax.plot(entropy_arr, marker='o', linewidth=2, color=cmap(cmap_idx), label=f'$\sigma$ = {sigma}, t = {diffusion_t}')
-    ax.legend(loc='lower right')
+    ax.legend(loc='lower left', ncols=3)
 
     ax.set_ylim([0, ax.get_ylim()[1]])
-    ax.tick_params(axis='both', which='major', labelsize=14)
-    ax.set_title(f'Diffusion Spectral Entropy', fontsize=18)
+    ax.tick_params(axis='both', which='major', labelsize=18)
     ax.set_xlabel('Layer', fontsize=14)
     ax.set_ylabel('Entropy', fontsize=14)
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
 
-    fig.suptitle('cossim(Embedding) Entropy per Layer', fontsize=24)
+    fig.suptitle('Embedding DSE per Layer', fontsize=24)
     fig.tight_layout(pad=2)
 
     if save_path:
