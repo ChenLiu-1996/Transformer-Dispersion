@@ -5,6 +5,7 @@ import torch
 from datasets import load_dataset
 from transformers import AlbertConfig, AlbertTokenizer, AlbertModel
 import matplotlib.pyplot as plt
+from tqdm import tqdm
 
 
 def get_random_long_text_input(dataset, tokenizer, min_length: int = 300) -> dict:
@@ -17,7 +18,7 @@ def get_random_long_text_input(dataset, tokenizer, min_length: int = 300) -> dic
 
 def compute_matrix_ranks(embeddings: List[torch.Tensor]) -> List[int]:
     ranks = []
-    for z in embeddings:
+    for z in tqdm(embeddings):
         z = z.squeeze(0)  # [seq_len, hidden_dim]
         rank = torch.linalg.matrix_rank(z).item()
         ranks.append(rank)
@@ -26,8 +27,9 @@ def compute_matrix_ranks(embeddings: List[torch.Tensor]) -> List[int]:
 def plot_matrix_ranks(ranks: List[int], save_path: str = None):
     fig = plt.figure(figsize=(10, 8))
     ax = fig.add_subplot(1, 1, 1)
-    ax.plot(ranks, marker='o', linewidth=2)
-    ax.set_title('Token Embedding Matrix Rank per Layer', fontsize=20)
+    ax.plot(ranks, marker='o', linewidth=2, color='#2ca02c')
+    ax.tick_params(axis='both', which='major', labelsize=18)
+    ax.set_title('Embedding Matrix Rank per Layer', fontsize=20)
     ax.set_xlabel('Layer', fontsize=18)
     ax.set_ylabel('Matrix Rank', fontsize=18)
     ax.spines['top'].set_visible(False)
@@ -37,10 +39,12 @@ def plot_matrix_ranks(ranks: List[int], save_path: str = None):
 
     if save_path:
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
-        plt.savefig(save_path, dpi=300)
-        plt.close()
+        fig.savefig(save_path, dpi=300)
+        plt.close(fig)
     else:
         plt.show()
+    return
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='parameters')
@@ -63,4 +67,4 @@ if __name__ == '__main__':
         output = model(**tokens, output_hidden_states=True)
         ranks = compute_matrix_ranks(output.hidden_states)
 
-    plot_matrix_ranks(ranks, save_path='../visualization/embedding_matrix_rank_albert_xlarge_v2.png')
+    plot_matrix_ranks(ranks, save_path='../../visualization/embedding_matrix_rank_albert_xlarge_v2.png')

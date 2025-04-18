@@ -11,6 +11,7 @@ from sklearn.manifold import TSNE
 import phate
 from datasets import load_dataset
 from transformers import AlbertTokenizer, AlbertConfig, AlbertModel
+from tqdm import tqdm
 
 
 def get_random_long_text_input(dataset, tokenizer, min_length: int = 300) -> dict:
@@ -52,7 +53,7 @@ def compute_embedding_clusters(embeddings: List[torch.Tensor],
     selected = [(i, emb) for i, emb in enumerate(embeddings) if i % step == 0]
     layer_cluster_data = []
 
-    for layer_idx, emb in selected:
+    for layer_idx, emb in tqdm(selected):
         z = torch.nn.functional.normalize(emb.squeeze(0), dim=1).cpu().numpy()  # [seq_len, dim]
         if method == 'phate':
             dim_reduction_op = phate.PHATE(n_components=2, random_state=random_seed)
@@ -62,8 +63,9 @@ def compute_embedding_clusters(embeddings: List[torch.Tensor],
         z_2d = dim_reduction_op.fit_transform(z)
 
         best_k, labels = auto_kmeans(z_2d, max_k=max_k, random_state=random_seed)
+        assert best_k == len(np.unique(labels))
 
-        layer_cluster_data.append({'layer': layer_idx, 'points': z_2d, 'labels': labels})
+        layer_cluster_data.append({'layer': layer_idx, 'points': z_2d, 'labels': labels, 'n_clusters': best_k})
 
     return layer_cluster_data
 
@@ -77,11 +79,11 @@ def plot_embedding_cluster(cluster_data: List[dict], save_path: str = None, meth
     axes = axes.flatten()
 
     for ax, data in zip(axes, cluster_data):
-        points, labels = data['points'], data['labels']
+        points, labels, n_clusters = data['points'], data['labels'], data['n_clusters']
         for cluster_id in np.unique(labels):
             cluster_points = points[labels == cluster_id]
             ax.scatter(cluster_points[:, 0], cluster_points[:, 1], s=10, label=f'C{cluster_id}', alpha=0.7)
-        ax.set_title(f"Layer {data['layer']} ({len(np.unique(labels))} clusters)", fontsize=18)
+        ax.set_title(f"Layer {data['layer']} ({n_clusters} clusters)", fontsize=18)
         ax.axis('off')
 
     for ax in axes[num_plots:]:
@@ -101,6 +103,7 @@ def plot_embedding_cluster(cluster_data: List[dict], save_path: str = None, meth
         plt.close(fig)
     else:
         plt.show()
+    return
 
 
 if __name__ == '__main__':
@@ -127,11 +130,11 @@ if __name__ == '__main__':
             embeddings=output.hidden_states,
             step=2,
             method=args.method,
-            max_k=30,
+            max_k=200,
             perplexity=5,
             random_seed=args.random_seed)
 
     plot_embedding_cluster(
         cluster_data,
-        save_path=f'../visualization/embedding_clusters_{args.method}_albert_xlarge_v2.png',
+        save_path=f'../../visualization/embedding_clusters_{args.method}_albert_xlarge_v2.png',
         method=args.method)
