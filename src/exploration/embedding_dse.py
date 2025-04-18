@@ -32,9 +32,9 @@ def organize_embeddings(embeddings: List[torch.Tensor]) -> List[np.ndarray]:
 def plot_DSE(embeddings_by_layer: List[np.ndarray], save_path: str = None):
     fig = plt.figure(figsize=(12, 8))
     ax = fig.add_subplot(1, 1, 1)
-    for sigma, color_base in zip([1, 10, 100], ['Blues', 'Reds', 'Greens']):
+    for sigma, color_base in zip([1, 5, 20], ['Blues', 'Reds', 'Greens']):
         cmap = plt.get_cmap(color_base)
-        for diffusion_t, cmap_idx in zip([1, 2, 5, 10], [0, 0.33, 0.66, 1.0]):
+        for diffusion_t, cmap_idx in zip([1, 2, 5, 10], [0.4, 0.6, 0.8, 1.0]):
             entropy_arr = [diffusion_spectral_entropy(embeddings, gaussian_kernel_sigma=sigma, t=diffusion_t)
                         for embeddings in embeddings_by_layer]
             ax.plot(entropy_arr, marker='o', linewidth=2, color=cmap(cmap_idx), label=f'$\sigma$ = {sigma}, t = {diffusion_t}')
