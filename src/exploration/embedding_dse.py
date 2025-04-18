@@ -30,22 +30,31 @@ def organize_embeddings(embeddings: List[torch.Tensor]) -> List[np.ndarray]:
     return embeddings_by_layer
 
 def plot_DSE(embeddings_by_layer: List[np.ndarray], save_path: str = None):
-    fig = plt.figure(figsize=(12, 8))
-    ax = fig.add_subplot(1, 1, 1)
-    for sigma, color_base in zip([1, 5, 10], ['Blues', 'Reds', 'Greens']):
-        cmap = plt.get_cmap(color_base)
-        for diffusion_t, cmap_idx in zip([1, 2, 5, 10], [0.4, 0.6, 0.8, 1.0]):
-            entropy_arr = [diffusion_spectral_entropy(embeddings, gaussian_kernel_sigma=sigma, t=diffusion_t)
-                        for embeddings in embeddings_by_layer]
-            ax.plot(entropy_arr, marker='o', linewidth=2, color=cmap(cmap_idx), label=f'$\sigma$ = {sigma}, t = {diffusion_t}')
-    ax.legend(loc='lower left', ncols=3)
+    fig = plt.figure(figsize=(16, 8))
+    for subplot_idx, l2_normalize in enumerate([False, True]):
+        if l2_normalize:
+            normalize_func = normalize_numpy
+        else:
+            normalize_func = lambda x: x
+        ax = fig.add_subplot(1, 2, subplot_idx + 1)
+        for sigma, color_base in zip([1, 5, 10], ['Blues', 'Reds', 'Greens']):
+            cmap = plt.get_cmap(color_base)
+            for diffusion_t, cmap_idx in zip([1, 2, 5, 10], [0.4, 0.6, 0.8, 1.0]):
+                entropy_arr = [diffusion_spectral_entropy(normalize_func(embeddings), gaussian_kernel_sigma=sigma, t=diffusion_t)
+                               for embeddings in embeddings_by_layer]
+                ax.plot(entropy_arr, marker='o', linewidth=2, color=cmap(cmap_idx), label=f'$\sigma$ = {sigma}, t = {diffusion_t}')
+        ax.legend(loc='upper right', ncols=3)
 
-    ax.set_ylim([0, ax.get_ylim()[1]])
-    ax.tick_params(axis='both', which='major', labelsize=18)
-    ax.set_xlabel('Layer', fontsize=14)
-    ax.set_ylabel('Entropy', fontsize=14)
-    ax.spines['top'].set_visible(False)
-    ax.spines['right'].set_visible(False)
+        ax.set_ylim([0, ax.get_ylim()[1] * 1.2])
+        ax.tick_params(axis='both', which='major', labelsize=18)
+        if l2_normalize:
+            ax.set_title('With L2 normalization', fontsize=18)
+        else:
+            ax.set_title('Without L2 normalization', fontsize=18)
+        ax.set_xlabel('Layer', fontsize=18)
+        ax.set_ylabel('Entropy', fontsize=18)
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
 
     fig.suptitle('Embedding DSE per Layer', fontsize=24)
     fig.tight_layout(pad=2)
@@ -57,6 +66,10 @@ def plot_DSE(embeddings_by_layer: List[np.ndarray], save_path: str = None):
     else:
         plt.show()
     return
+
+def normalize_numpy(x, p=2, axis=1, eps=1e-12):
+    norm = np.linalg.norm(x, ord=p, axis=axis, keepdims=True)
+    return x / (norm + eps)
 
 
 if __name__ == '__main__':

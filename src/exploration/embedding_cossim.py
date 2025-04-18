@@ -79,13 +79,13 @@ def plot_probability(cossim_matrix_by_layer: List[np.ndarray], save_path: str = 
         ax = fig.add_subplot(2, 2, subplot_idx + 1)
         ax.plot(curr_prob, marker='o', linewidth=2, color='#2ca02c')
         ax.tick_params(axis='both', which='major', labelsize=14)
-        ax.set_title(f'Cosine Similarity >= {threshold}', fontsize=18)
+        ax.set_title(fr'Cosine Similarity $\geq$ {threshold}', fontsize=18)
         ax.set_xlabel('Layer', fontsize=14)
         ax.set_ylabel('Probability', fontsize=14)
         ax.spines['top'].set_visible(False)
         ax.spines['right'].set_visible(False)
 
-    fig.suptitle('cossim(Embedding) per Layer', fontsize=24)
+    fig.suptitle(r'P(cossim(Embedding)$\approx$1) per Layer', fontsize=24)
     fig.tight_layout(pad=2)
 
     if save_path:
@@ -101,10 +101,11 @@ def plot_entropy(cossim_matrix_by_layer: List[np.ndarray], save_path: str = None
     for subplot_idx, entropy_type in enumerate(['Shannon', 'von Neumann']):
         ax = fig.add_subplot(1, 2, subplot_idx + 1)
         if entropy_type == 'Shannon':
-            for num_bins, opacity in zip([64, 256, 1024, 4096], [0.2, 0.4, 0.6, 0.8]):
+            cmap = plt.get_cmap('Greens')
+            for num_bins, cmap_idx in zip([64, 256, 1024, 4096], [0.4, 0.6, 0.8, 1.0]):
                 entropy_arr = [compute_entropy(cossim_matrix, entropy_type=entropy_type, num_bins=num_bins)
                                for cossim_matrix in cossim_matrix_by_layer]
-                ax.plot(entropy_arr, marker='o', linewidth=2, color='#2ca02c', alpha=opacity, label=f'{num_bins} bins')
+                ax.plot(entropy_arr, marker='o', linewidth=2, color=cmap(cmap_idx), label=f'{num_bins} bins')
             ax.legend(loc='lower right')
         else:
             entropy_arr = [compute_entropy(cossim_matrix, entropy_type=entropy_type)
