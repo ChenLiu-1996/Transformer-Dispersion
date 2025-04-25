@@ -1,6 +1,7 @@
 from typing import List
 import argparse
 import os
+import sys
 import math
 import torch
 import numpy as np
@@ -12,6 +13,11 @@ import phate
 from datasets import load_dataset
 from transformers import AlbertTokenizer, AlbertConfig, AlbertModel
 from tqdm import tqdm
+
+
+import_dir = '/'.join(os.path.realpath(__file__).split('/')[:-2])
+sys.path.insert(0, import_dir)
+from dse.laplacian_extrema import get_laplacian_extrema
 
 
 def get_random_long_text_input(dataset, tokenizer, min_length: int = 300) -> dict:
@@ -29,7 +35,7 @@ def auto_kmeans(z_2d: np.ndarray, max_k: int = 10, random_state: int = 42):
     best_labels = None
 
     for k in range(2, max_k + 1):
-        kmeans = KMeans(n_clusters=k, n_init='auto', random_state=random_state)
+        kmeans = KMeans(n_clusters=k, n_init='auto', max_iter=100, random_state=random_state)
         labels = kmeans.fit_predict(z_2d)
 
         if len(np.unique(labels)) == 1:
@@ -44,23 +50,36 @@ def auto_kmeans(z_2d: np.ndarray, max_k: int = 10, random_state: int = 42):
     return best_k, best_labels
 
 
-def compute_embedding_clusters(embeddings: List[torch.Tensor],
+def compute_cosine_similarities(embeddings: List[torch.Tensor], eps: float = 1e-6) -> List[np.ndarray]:
+    cossim_matrix_by_layer = []
+    for z in tqdm(embeddings):
+        z = torch.nn.functional.normalize(z.squeeze(0), dim=1, p=2)
+        cossim_matrix = torch.matmul(z, z.T).cpu().numpy()
+
+        # Clipping to avoid some numerical error.
+        assert cossim_matrix.min() > -1 - eps and cossim_matrix.max() < 1 + eps
+        cossim_matrix = np.clip(cossim_matrix, -1, 1)
+
+        cossim_matrix_by_layer.append(cossim_matrix)
+    return cossim_matrix_by_layer
+
+
+def compute_embedding_clusters(cossim_matrix_by_layer: List[np.ndarray],
                                step: int = 10,
                                max_k: int = 10,
                                method: str = 'phate',
-                               perplexity: int = 30,
                                random_seed: int = 42) -> List[dict]:
-    selected = [(i, emb) for i, emb in enumerate(embeddings) if i % step == 0]
+    cossim_matrix_selected_layers = [(i, cossim_matrix) for i, cossim_matrix in enumerate(cossim_matrix_by_layer) if i % step == 0]
     layer_cluster_data = []
 
-    for layer_idx, emb in tqdm(selected):
-        z = torch.nn.functional.normalize(emb.squeeze(0), dim=1).cpu().numpy()  # [seq_len, dim]
+    for layer_idx, cossim_matrix in tqdm(cossim_matrix_selected_layers):
+        angular_distance = np.arccos(cossim_matrix)
         if method == 'phate':
-            dim_reduction_op = phate.PHATE(n_components=2, random_state=random_seed)
+            phate_op = phate.PHATE(n_components=2, knn_dist='precomputed_distance', random_state=random_seed)
+            z_2d = phate_op.fit_transform(angular_distance)
         elif method == 'tsne':
-            dim_reduction_op = TSNE(n_components=2, perplexity=perplexity, random_state=random_seed)
-
-        z_2d = dim_reduction_op.fit_transform(z)
+            tsne_op = TSNE(n_components=2, init='random', metric='precomputed', random_state=random_seed)
+            z_2d = tsne_op.fit_transform(angular_distance)
 
         best_k, labels = auto_kmeans(z_2d, max_k=max_k, random_state=random_seed)
         assert best_k == len(np.unique(labels))
@@ -69,6 +88,29 @@ def compute_embedding_clusters(embeddings: List[torch.Tensor],
 
     return layer_cluster_data
 
+# def compute_embedding_clusters(embeddings: List[torch.Tensor],
+#                                step: int = 10,
+#                                max_k: int = 100,
+#                                method: str = 'phate',
+#                                random_seed: int = 42) -> List[dict]:
+#     embeddings_selected_layers = [(i, cossim_matrix) for i, cossim_matrix in enumerate(embeddings) if i % step == 0]
+#     layer_cluster_data = []
+
+#     for layer_idx, embeddings in tqdm(embeddings_selected_layers):
+#         z = torch.nn.functional.normalize(embeddings.squeeze(0), dim=1).cpu().numpy()  # [seq_len, dim]
+#         if method == 'phate':
+#             phate_op = phate.PHATE(n_components=2, knn_dist='cosine', mds_dist='cosine', random_state=random_seed, t=10)
+#             z_2d = phate_op.fit_transform(z)
+#         elif method == 'tsne':
+#             tsne_op = TSNE(n_components=2, metric='cosine', random_state=random_seed)
+#             z_2d = tsne_op.fit_transform(z)
+
+#         best_k, labels = auto_kmeans(z_2d, max_k=max_k, random_state=random_seed)
+#         assert best_k == len(np.unique(labels))
+
+#         layer_cluster_data.append({'layer': layer_idx, 'points': z_2d, 'labels': labels, 'n_clusters': best_k})
+
+#     return layer_cluster_data
 
 def plot_embedding_cluster(cluster_data: List[dict], save_path: str = None, method: str = 'phate'):
     num_plots = len(cluster_data)
@@ -84,10 +126,10 @@ def plot_embedding_cluster(cluster_data: List[dict], save_path: str = None, meth
             cluster_points = points[labels == cluster_id]
             ax.scatter(cluster_points[:, 0], cluster_points[:, 1], s=10, label=f'C{cluster_id}', alpha=0.7)
         ax.set_title(f"Layer {data['layer']} ({n_clusters} clusters)", fontsize=18)
-        ax.axis('off')
+        # ax.axis('off')
 
-    for ax in axes[num_plots:]:
-        ax.axis('off')
+    # for ax in axes[num_plots:]:
+    #     ax.axis('off')
 
     if method == 'phate':
         method_name = 'PHATE'
@@ -126,15 +168,20 @@ if __name__ == '__main__':
     # Dimensionality-reduce and plot the embeddings in 2D.
     with torch.no_grad():
         output = model(**tokens, output_hidden_states=True)
+        cossim_matrix_by_layer = compute_cosine_similarities(output.hidden_states)
         cluster_data = compute_embedding_clusters(
-            embeddings=output.hidden_states,
+            cossim_matrix_by_layer=cossim_matrix_by_layer,
             step=2,
             method=args.method,
-            max_k=200,
-            perplexity=5,
             random_seed=args.random_seed)
+
+        # cluster_data = compute_embedding_clusters(
+        #     embeddings=output.hidden_states,
+        #     step=2,
+        #     method=args.method,
+        #     random_seed=args.random_seed)
 
     plot_embedding_cluster(
         cluster_data,
-        save_path=f'../../visualization/embedding_clusters_{args.method}_albert_xlarge_v2.png',
+        save_path=f'../../visualization/transformer/embedding_clusters_{args.method}_albert_xlarge_v2.png',
         method=args.method)

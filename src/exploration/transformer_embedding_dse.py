@@ -96,4 +96,4 @@ if __name__ == '__main__':
     # Plot and save DSE.
     plot_DSE(
         embeddings_by_layer,
-        save_path='../../visualization/embedding_DSE_albert_xlarge_v2.png')
+        save_path='../../visualization/transformer/embedding_DSE_albert_xlarge_v2.png')

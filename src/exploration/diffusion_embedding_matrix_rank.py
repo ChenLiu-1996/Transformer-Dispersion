@@ -1,11 +1,17 @@
 from typing import List
 import argparse
 import os
+import sys
+import numpy as np
 import torch
 from datasets import load_dataset
 from transformers import AlbertConfig, AlbertTokenizer, AlbertModel
 import matplotlib.pyplot as plt
 from tqdm import tqdm
+
+import_dir = '/'.join(os.path.realpath(__file__).split('/')[:-2])
+sys.path.insert(0, import_dir)
+from diffusion.diffusion_condensation import diffusion_condensation
 
 
 def get_random_long_text_input(dataset, tokenizer, min_length: int = 300) -> dict:
@@ -16,11 +22,10 @@ def get_random_long_text_input(dataset, tokenizer, min_length: int = 300) -> dic
         if tokens['input_ids'].shape[1] > min_length:
             return tokens
 
-def compute_matrix_ranks(embeddings: List[torch.Tensor]) -> List[int]:
+def compute_matrix_ranks(embeddings: List[np.ndarray]) -> List[int]:
     ranks = []
     for z in tqdm(embeddings):
-        z = z.squeeze(0)  # [seq_len, hidden_dim]
-        rank = torch.linalg.matrix_rank(z).item()
+        rank = np.linalg.matrix_rank(z).item()
         ranks.append(rank)
     return ranks
 
@@ -65,6 +70,16 @@ if __name__ == '__main__':
     # Compute the matrix rank of the embeddings.
     with torch.no_grad():
         output = model(**tokens, output_hidden_states=True)
-        ranks = compute_matrix_ranks(output.hidden_states)
 
-    plot_matrix_ranks(ranks, save_path='../../visualization/embedding_matrix_rank_albert_xlarge_v2.png')
+        # Effectively only take the first 2 layers.
+        z_0 = output.hidden_states[0].squeeze(0)  # [seq_len, hidden_dim]
+        z_0 = torch.nn.functional.normalize(z_0, dim=1, p=2).cpu().numpy()
+        z_1 = output.hidden_states[1].squeeze(0)  # [seq_len, hidden_dim]
+        z_1 = torch.nn.functional.normalize(z_1, dim=1, p=2).cpu().numpy()
+
+        embeddings_by_layer = diffusion_condensation(X=z_1, random_seed=args.random_seed)
+        embeddings_by_layer = [z_0] + embeddings_by_layer
+
+        ranks = compute_matrix_ranks(embeddings_by_layer)
+
+    plot_matrix_ranks(ranks, save_path='../../visualization/diffusion/embedding_matrix_rank_albert_xlarge_v2.png')

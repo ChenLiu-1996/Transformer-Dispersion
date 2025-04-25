@@ -19,4 +19,6 @@ python -m pip install git+https://github.com/openai/CLIP.git
 python -m pip install diffusers["torch"]==0.21.4 transformers huggingface_hub==0.25.2
 python -m pip install datasets sentencepiece
 python -m pip install numpy==1.26
+
+python -m pip install -U phate
 ```

@@ -5,15 +5,12 @@ https://arxiv.org/pdf/2312.04823
 
 import numpy as np
 import os
-import sys
 import random
 
 from sklearn.metrics import pairwise_distances
 
-import_dir = '/'.join(os.path.realpath(__file__).split('/')[:-1])
-sys.path.insert(0, import_dir)
-from information_utils import approx_eigvals, exact_eigvals
-from diffusion import compute_diffusion_matrix
+import warnings
+warnings.filterwarnings("ignore")
 
 
 def diffusion_spectral_entropy(embedding_vectors: np.array,
@@ -309,6 +306,85 @@ def adjacency_spectral_entropy(embedding_vectors: np.array,
 
     return entropy
 
+
+def compute_diffusion_matrix(X: np.array, sigma: float = 10.0):
+    '''
+    Adapted from
+    https://github.com/professorwug/diffusion_curvature/blob/master/diffusion_curvature/core.py
+
+    Given input X returns a diffusion matrix P, as an numpy ndarray.
+    Using the "anisotropic" kernel
+    Inputs:
+        X: a numpy array of size n x d
+        sigma: a float
+            conceptually, the neighborhood size of Gaussian kernel.
+    Returns:
+        K: a numpy array of size n x n that has the same eigenvalues as the diffusion matrix.
+    '''
+
+    # Construct the distance matrix.
+    D = pairwise_distances(X)
+
+    # Gaussian kernel
+    G = (1 / (sigma * np.sqrt(2 * np.pi))) * np.exp((-D**2) / (2 * sigma**2))
+
+    # Anisotropic density normalization.
+    Deg = np.diag(1 / np.sum(G, axis=1)**0.5)
+    K = Deg @ G @ Deg
+
+    # Now K has the exact same eigenvalues as the diffusion matrix `P`
+    # which is defined as `P = D^{-1} K`, with `D = np.diag(np.sum(K, axis=1))`.
+
+    return K
+
+def approx_eigvals(A: np.array, filter_thr: float = 1e-3):
+    '''
+    Estimate the eigenvalues of a matrix `A` using
+    Chebyshev approximation of the eigenspectrum.
+
+    Assuming the eigenvalues of `A` are within [-1, 1].
+
+    There is no guarantee the set of eigenvalues are accurate.
+    '''
+    from DiffusionEMD.diffusion_emd import estimate_dos
+
+    matrix = A.copy()
+    N = matrix.shape[0]
+
+    if filter_thr is not None:
+        matrix[np.abs(matrix) < filter_thr] = 0
+
+    # Chebyshev approximation of eigenspectrum.
+    eigs, cdf = estimate_dos(matrix)
+
+    # CDF to PDF conversion.
+    pdf = np.zeros_like(cdf)
+    for i in range(len(cdf) - 1):
+        pdf[i] = cdf[i + 1] - cdf[i]
+
+    # Estimate the set of eigenvalues.
+    counts = N * pdf / np.sum(pdf)
+    eigenvalues = []
+    for i, count in enumerate(counts):
+        if np.round(count) > 0:
+            eigenvalues += [eigs[i]] * int(np.round(count))
+
+    eigenvalues = np.array(eigenvalues)
+
+    return eigenvalues
+
+
+def exact_eigvals(A: np.array):
+    '''
+    Compute the exact eigenvalues.
+    '''
+    if np.allclose(A, A.T, rtol=1e-5, atol=1e-8):
+        # Symmetric matrix.
+        eigenvalues = np.linalg.eigvalsh(A)
+    else:
+        eigenvalues = np.linalg.eigvals(A)
+
+    return eigenvalues
 
 
 if __name__ == '__main__':

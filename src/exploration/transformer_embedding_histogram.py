@@ -186,15 +186,15 @@ if __name__ == '__main__':
         output = model(**tokens, output_hidden_states=True)
         cossim_matrix_by_layer = compute_cosine_similarities(output.hidden_states)
 
-    # Plot and save histograms.
-    plot_similarity_histograms(
-        cossim_matrix_by_layer,
-        save_path='../../visualization/embedding_cossim_histogram_albert_xlarge_v2.png')
-
     # Plot and save metrics (prob density, entropy, etc.).
     plot_probability(
         cossim_matrix_by_layer,
-        save_path='../../visualization/embedding_cossim_probability_albert_xlarge_v2.png')
+        save_path='../../visualization/transformer/embedding_cossim_probability_albert_xlarge_v2.png')
     plot_entropy(
         cossim_matrix_by_layer,
-        save_path='../../visualization/embedding_cossim_entropy_albert_xlarge_v2.png')
+        save_path='../../visualization/transformer/embedding_cossim_entropy_albert_xlarge_v2.png')
+
+    # Plot and save histograms.
+    plot_similarity_histograms(
+        cossim_matrix_by_layer,
+        save_path='../../visualization/transformer/embedding_cossim_histogram_albert_xlarge_v2.png')
