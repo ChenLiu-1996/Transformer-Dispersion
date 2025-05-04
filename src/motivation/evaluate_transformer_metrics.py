@@ -7,10 +7,8 @@ import pandas as pd
 import torch
 from datasets import load_dataset
 from transformers import AutoConfig, AutoModel, AutoTokenizer
-import matplotlib.pyplot as plt
 from tqdm import tqdm
 import tempfile
-import nltk
 from nltk.tokenize import word_tokenize
 
 import_dir = '/'.join(os.path.realpath(__file__).split('/')[:-2])
@@ -127,6 +125,8 @@ if __name__ == '__main__':
     parser.add_argument('--repeat', type=int, default=5)
     args = parser.parse_args()
 
+    # NOTE: The model performance is copied from
+    # https://huggingface.co/spaces/open-llm-leaderboard/open_llm_leaderboard#/
     model_zoo = pd.read_csv('model_performance.csv')
 
     output_csv = 'condensation_vs_performance.csv'
