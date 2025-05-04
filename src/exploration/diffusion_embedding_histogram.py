@@ -49,11 +49,6 @@ def plot_similarity_histograms(cossim_matrix_by_layer: List[np.ndarray],
     fig, axes = plt.subplots(rows, cols, figsize=(cols * 4, rows * 3))
     axes = axes.flatten()
 
-    # Global y-axis limit for consistent scaling
-    max_density = max(
-        np.histogram(data, bins=bins, density=True)[0].max() for _, data in selected
-    )
-
     for ax, (i, cossim_matrix) in zip(axes, selected):
         cossim_arr = cossim_matrix.flatten()
         IQR = np.percentile(cossim_arr, 75) - np.percentile(cossim_arr, 25)
@@ -68,7 +63,6 @@ def plot_similarity_histograms(cossim_matrix_by_layer: List[np.ndarray],
         ax.tick_params(axis='both', which='major', labelsize=18)
         ax.set_title(f'Layer {i}', fontsize=32)
         ax.set_xlim([-0.4, 1.1])
-        ax.set_ylim(0, max_density * 1.1)
 
     # Turn off unused axes
     for ax in axes[num_plots:]:
@@ -220,4 +214,5 @@ if __name__ == '__main__':
     # Plot and save histograms.
     plot_similarity_histograms(
         cossim_matrix_by_layer,
+        step=4,
         save_path='../../visualization/diffusion/embedding_cossim_histogram_albert_xlarge_v2.png')

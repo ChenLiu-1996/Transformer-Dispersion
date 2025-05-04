@@ -8,16 +8,11 @@ import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score
-from sklearn.manifold import TSNE
+# from sklearn.manifold import TSNE
 import phate
 from datasets import load_dataset
 from transformers import AlbertTokenizer, AlbertConfig, AlbertModel
 from tqdm import tqdm
-
-
-import_dir = '/'.join(os.path.realpath(__file__).split('/')[:-2])
-sys.path.insert(0, import_dir)
-from dse.laplacian_extrema import get_laplacian_extrema
 
 
 def get_random_long_text_input(dataset, tokenizer, min_length: int = 300) -> dict:
@@ -66,7 +61,7 @@ def compute_cosine_similarities(embeddings: List[torch.Tensor], eps: float = 1e-
 
 def compute_embedding_clusters(cossim_matrix_by_layer: List[np.ndarray],
                                step: int = 10,
-                               max_k: int = 10,
+                            #    max_k: int = 10,
                                method: str = 'phate',
                                random_seed: int = 42) -> List[dict]:
     cossim_matrix_selected_layers = [(i, cossim_matrix) for i, cossim_matrix in enumerate(cossim_matrix_by_layer) if i % step == 0]
@@ -78,13 +73,17 @@ def compute_embedding_clusters(cossim_matrix_by_layer: List[np.ndarray],
             phate_op = phate.PHATE(n_components=2, knn_dist='precomputed_distance', random_state=random_seed)
             z_2d = phate_op.fit_transform(angular_distance)
         elif method == 'tsne':
-            tsne_op = TSNE(n_components=2, init='random', metric='precomputed', random_state=random_seed)
-            z_2d = tsne_op.fit_transform(angular_distance)
+            raise NotImplementedError
+            # tsne_op = TSNE(n_components=2, init='random', metric='precomputed', random_state=random_seed)
+            # z_2d = tsne_op.fit_transform(angular_distance)
 
-        best_k, labels = auto_kmeans(z_2d, max_k=max_k, random_state=random_seed)
-        assert best_k == len(np.unique(labels))
+        if layer_idx == 0:
+            # best_k, labels = auto_kmeans(z_2d, max_k=max_k, random_state=random_seed)
+            # assert best_k == len(np.unique(labels))
+            kmeans = KMeans(n_clusters=10, n_init='auto', max_iter=100, random_state=random_seed)
+            labels = kmeans.fit_predict(z_2d)
 
-        layer_cluster_data.append({'layer': layer_idx, 'points': z_2d, 'labels': labels, 'n_clusters': best_k})
+        layer_cluster_data.append({'layer': layer_idx, 'points': z_2d, 'labels': labels})
 
     return layer_cluster_data
 
@@ -121,11 +120,11 @@ def plot_embedding_cluster(cluster_data: List[dict], save_path: str = None, meth
     axes = axes.flatten()
 
     for ax, data in zip(axes, cluster_data):
-        points, labels, n_clusters = data['points'], data['labels'], data['n_clusters']
+        points, labels = data['points'], data['labels']
         for cluster_id in np.unique(labels):
             cluster_points = points[labels == cluster_id]
             ax.scatter(cluster_points[:, 0], cluster_points[:, 1], s=10, label=f'C{cluster_id}', alpha=0.7)
-        ax.set_title(f"Layer {data['layer']} ({n_clusters} clusters)", fontsize=18)
+        ax.set_title(f"Layer {data['layer']}", fontsize=18)
         # ax.axis('off')
 
     # for ax in axes[num_plots:]:
