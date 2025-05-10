@@ -122,7 +122,7 @@ def normalize_numpy(x, p=2, axis=1, eps=1e-12):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='parameters')
-    parser.add_argument('--repeat', type=int, default=5)
+    parser.add_argument('--repeat', type=int, default=3)
     args = parser.parse_args()
 
     # NOTE: The model performance is copied from
