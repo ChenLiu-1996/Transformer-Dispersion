@@ -47,7 +47,8 @@ if __name__ == '__main__':
                     DSE_arr_std = DSE_arr.mean(axis=0)
                     ax.scatter(np.repeat(df_curr_model[performance_measure].astype(float).mean(), len(DSE_arr_mean)),
                                DSE_arr_mean,
-                               c=np.linspace(0, 1, len(DSE_arr_mean)),
+                               s=df_curr_model['parameters (B)'].mean() * 5,
+                               c=np.linspace(0.2, 1, len(DSE_arr_mean)),
                                cmap='Reds')
                     ax.plot(np.repeat(df_curr_model[performance_measure].astype(float).mean(), len(DSE_arr_mean)),
                             DSE_arr_mean,
@@ -60,8 +61,9 @@ if __name__ == '__main__':
                     VNE_arr_std = VNE_arr.mean(axis=0)
                     ax.scatter(np.repeat(df_curr_model[performance_measure].astype(float).mean(), len(VNE_arr_mean)),
                                VNE_arr_mean,
-                               c=np.linspace(0, 1, len(VNE_arr_mean)),
-                               cmap='Blues')
+                               s=df_curr_model['parameters (B)'].mean() * 5,
+                               c=np.linspace(0.2, 1, len(VNE_arr_mean)),
+                               cmap='Reds')
                     ax.plot(np.repeat(df_curr_model[performance_measure].astype(float).mean(), len(VNE_arr_mean)),
                             VNE_arr_mean,
                             color='black', alpha=0.2)
@@ -84,7 +86,7 @@ if __name__ == '__main__':
                 df_subset_averaged_over_seed['series'] = df_subset_averaged_over_seed['huggingface_ID'].apply(extract_series)
 
                 ax.scatter(df_subset_averaged_over_seed[performance_measure], df_subset_averaged_over_seed['final_layer_DSE'],
-                           s=df_subset_averaged_over_seed['parameters (B)'] * 5,
+                           s=df_subset_averaged_over_seed['parameters (B)'] * 10,
                            color='firebrick', alpha=0.5)
 
                 for name, group in df_subset_averaged_over_seed.groupby('series'):
@@ -100,8 +102,8 @@ if __name__ == '__main__':
                 df_subset_averaged_over_seed = df_subset[['huggingface_ID', 'parameters (B)', performance_measure, 'final_layer_VNE']].groupby(['huggingface_ID']).mean().reset_index()
                 df_subset_averaged_over_seed['series'] = df_subset_averaged_over_seed['huggingface_ID'].apply(extract_series)
                 ax.scatter(df_subset_averaged_over_seed[performance_measure], df_subset_averaged_over_seed['final_layer_VNE'],
-                           s=df_subset_averaged_over_seed['parameters (B)'] * 5,
-                           color='skyblue', alpha=0.5)
+                           s=df_subset_averaged_over_seed['parameters (B)'] * 10,
+                           color='firebrick', alpha=0.5)
 
                 for name, group in df_subset_averaged_over_seed.groupby('series'):
                     if len(group) > 1:

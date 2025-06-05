@@ -14,6 +14,7 @@ from tqdm import tqdm
 
 import_dir = '/'.join(os.path.realpath(__file__).split('/')[:-2])
 sys.path.insert(0, import_dir)
+from diffusion.diffusion_condensation import diffusion_condensation
 from utils.text_data import get_random_long_text
 
 
@@ -38,19 +39,17 @@ def auto_kmeans(z_2d: np.ndarray, max_k: int = 10, random_state: int = 42):
     return best_k, best_labels
 
 
-def compute_cosine_similarities(embeddings: List[torch.Tensor], eps: float = 1e-6) -> List[np.ndarray]:
+def compute_cosine_similarities(embeddings: List[np.ndarray]) -> List[np.ndarray]:
     cossim_matrix_by_layer = []
     for z in tqdm(embeddings):
-        z = torch.nn.functional.normalize(z.squeeze(0), dim=1, p=2)
-        cossim_matrix = torch.matmul(z, z.T).cpu().numpy()
-
-        # Clipping to avoid some numerical error.
-        assert cossim_matrix.min() > -1 - eps and cossim_matrix.max() < 1 + eps
-        cossim_matrix = np.clip(cossim_matrix, -1, 1)
-
+        z = normalize(z, axis=1)
+        cossim_matrix = np.matmul(z, z.T)
         cossim_matrix_by_layer.append(cossim_matrix)
     return cossim_matrix_by_layer
 
+def normalize(x, p=2, axis=1, eps=1e-3):
+    norm = np.linalg.norm(x, ord=p, axis=axis, keepdims=True)
+    return x / np.maximum(norm, eps)
 
 def compute_embedding_clusters(cossim_matrix_by_layer: List[np.ndarray],
                                step: int = 10,
@@ -80,29 +79,6 @@ def compute_embedding_clusters(cossim_matrix_by_layer: List[np.ndarray],
 
     return layer_cluster_data
 
-# def compute_embedding_clusters(embeddings: List[torch.Tensor],
-#                                step: int = 10,
-#                                max_k: int = 100,
-#                                method: str = 'phate',
-#                                random_seed: int = 42) -> List[dict]:
-#     embeddings_selected_layers = [(i, cossim_matrix) for i, cossim_matrix in enumerate(embeddings) if i % step == 0]
-#     layer_cluster_data = []
-
-#     for layer_idx, embeddings in tqdm(embeddings_selected_layers):
-#         z = torch.nn.functional.normalize(embeddings.squeeze(0), dim=1).cpu().numpy()  # [seq_len, dim]
-#         if method == 'phate':
-#             phate_op = phate.PHATE(n_components=2, knn_dist='cosine', mds_dist='cosine', random_state=random_seed, t=10)
-#             z_2d = phate_op.fit_transform(z)
-#         elif method == 'tsne':
-#             tsne_op = TSNE(n_components=2, metric='cosine', random_state=random_seed)
-#             z_2d = tsne_op.fit_transform(z)
-
-#         best_k, labels = auto_kmeans(z_2d, max_k=max_k, random_state=random_seed)
-#         assert best_k == len(np.unique(labels))
-
-#         layer_cluster_data.append({'layer': layer_idx, 'points': z_2d, 'labels': labels, 'n_clusters': best_k})
-
-#     return layer_cluster_data
 
 def plot_embedding_cluster(cluster_data: List[dict], save_path: str = None, method: str = 'phate'):
     num_plots = len(cluster_data)
@@ -157,23 +133,27 @@ if __name__ == '__main__':
     text = get_random_long_text('wikipedia')
     tokens = tokenizer(text, return_tensors='pt', truncation=True)
 
-    # Dimensionality-reduce and plot the embeddings in 2D.
+    # Extract the cosine similarities among token embeddings (hidden states).
     with torch.no_grad():
         output = model(**tokens, output_hidden_states=True)
-        cossim_matrix_by_layer = compute_cosine_similarities(output.hidden_states)
+
+        # Effectively only take the first 2 layers.
+        z_0 = output.hidden_states[0].squeeze(0)  # [seq_len, hidden_dim]
+        z_0 = torch.nn.functional.normalize(z_0, dim=1, p=2).cpu().numpy()
+        z_1 = output.hidden_states[1].squeeze(0)  # [seq_len, hidden_dim]
+        z_1 = torch.nn.functional.normalize(z_1, dim=1, p=2).cpu().numpy()
+
+        embeddings_by_layer = diffusion_condensation(X=z_1, random_seed=args.random_seed)
+        embeddings_by_layer = [z_0] + embeddings_by_layer
+
+        cossim_matrix_by_layer = compute_cosine_similarities(embeddings_by_layer)
         cluster_data = compute_embedding_clusters(
             cossim_matrix_by_layer=cossim_matrix_by_layer,
-            step=2,
+            step=4,
             method=args.method,
             random_seed=args.random_seed)
 
-        # cluster_data = compute_embedding_clusters(
-        #     embeddings=output.hidden_states,
-        #     step=2,
-        #     method=args.method,
-        #     random_seed=args.random_seed)
-
     plot_embedding_cluster(
         cluster_data,
-        save_path=f'../../visualization/transformer/embedding_clusters_{args.method}_albert_xlarge_v2.png',
+        save_path=f'../../visualization/diffusion/embedding_clusters_{args.method}_albert_xlarge_v2.png',
         method=args.method)

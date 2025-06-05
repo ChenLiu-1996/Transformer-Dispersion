@@ -14,33 +14,8 @@ from nltk.tokenize import word_tokenize
 import_dir = '/'.join(os.path.realpath(__file__).split('/')[:-2])
 sys.path.insert(0, import_dir)
 from dse.dse import diffusion_spectral_entropy
+from utils.text_data import get_random_long_text
 
-
-def get_random_long_text(dataset_name,
-                         min_word_count: int = 500,
-                         max_word_count: int = 700,
-                         split: str = 'train') -> dict:
-    if dataset_name == 'wikipedia':
-        dataset = load_dataset("wikitext", "wikitext-103-v1")
-        key = 'text'
-    elif dataset_name == 'pubmed':
-        dataset = load_dataset("pubmed_qa", "pqa_labeled")
-        key = 'long_answer'
-    elif dataset_name == 'imdb':
-        dataset = load_dataset("imdb")
-        key = 'text'
-    elif dataset_name == 'squad':
-        dataset = load_dataset("squad")
-        key = 'context'
-
-    text = ''
-    idx = torch.randint(int(len(dataset['train']) * 0.95), (1,)).item()
-    while len(word_tokenize(text)) < min_word_count:
-        text += dataset[split][idx][key]
-        idx += 1
-        if len(word_tokenize(text)) > max_word_count:
-            break
-    return text
 
 def extract_embeddings(hidden_states: List[torch.Tensor]) -> List[np.ndarray]:
     embeddings_by_layer = []
