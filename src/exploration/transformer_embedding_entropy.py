@@ -75,6 +75,44 @@ def plot_similarity_histograms(cossim_matrix_by_layer: List[np.ndarray],
         plt.show()
     return
 
+def plot_similarity_heatmap(cossim_matrix_by_layer: List[np.ndarray],
+                            save_path: str = None,
+                            step: int = 1,
+                            bins: int = 64):
+    selected = [(i, data) for i, data in enumerate(cossim_matrix_by_layer) if i % step == 0]
+
+    layer_indices, hist_data = [], []
+    for (layer_idx, cossim_matrix) in selected:
+        cossim_arr = cossim_matrix.flatten()
+        hist, _ = np.histogram(cossim_arr, bins=bins, density=False, range=(-1, 1))
+        hist_data.append(hist)
+        layer_indices.append(layer_idx)
+    hist_matrix = np.array(hist_data)
+
+    fig = plt.figure(figsize=(12, 10))
+    ax = fig.add_subplot(1, 1, 1)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+
+    im = ax.imshow(hist_matrix, aspect="auto", origin="lower", cmap='Reds', extent=[-1, 1, 0, layer_indices[-1]])
+
+    ax.tick_params(axis='both', which='major', labelsize=18)
+    ax.set_title('Cosine Similarity by Layer', fontsize=28, pad=20)
+    ax.set_xlabel('Cosine Similarity', fontsize=24)
+    ax.set_ylabel('Layer', fontsize=24)
+
+    fig.colorbar(im, ax=ax)
+
+    fig.tight_layout(pad=2)
+
+    if save_path:
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        fig.savefig(save_path, dpi=300)
+        plt.close(fig)
+    else:
+        plt.show()
+    return
+
 def plot_probability(cossim_matrix_by_layer: List[np.ndarray], save_path: str = None):
     fig = plt.figure(figsize=(10, 8))
     for subplot_idx, threshold in enumerate([0.9, 0.95, 0.99, 1.0]):
@@ -237,6 +275,10 @@ if __name__ == '__main__':
     plot_similarity_histograms(
         cossim_matrix_by_layer,
         save_path='../../visualization/transformer/embedding_cossim_histogram_albert_xlarge_v2.png')
+
+    plot_similarity_heatmap(
+        cossim_matrix_by_layer,
+        save_path='../../visualization/transformer/embedding_cossim_heatmap_albert_xlarge_v2.png')
 
     # Plot and save metrics (prob density, entropy, etc.).
     plot_probability(
