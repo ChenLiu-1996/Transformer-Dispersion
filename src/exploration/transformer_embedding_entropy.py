@@ -5,11 +5,13 @@ import sys
 import math
 import numpy as np
 import torch
-from transformers import AlbertConfig, AlbertTokenizer, AlbertModel
+from transformers import AutoConfig, AutoTokenizer, AutoModel
+from huggingface_hub import login
 import matplotlib.pyplot as plt
+import tempfile
 from tqdm import tqdm
 
-import_dir = '/'.join(os.path.realpath(__file__).split('/')[:-2])
+import_dir = '/'.join(os.path.realpath(__file__).split("/")[:-2])
 sys.path.insert(0, import_dir)
 from utils.text_data import get_random_long_text
 from dse.dse import diffusion_spectral_entropy
@@ -33,7 +35,7 @@ def compute_cosine_similarities(embeddings: List[np.ndarray]) -> List[np.ndarray
 def plot_similarity_histograms(cossim_matrix_by_layer: List[np.ndarray],
                                save_path: str = None,
                                step: int = 1,
-                               bins: int = 64):
+                               bins: int = 128):
     selected = [(i, data) for i, data in enumerate(cossim_matrix_by_layer) if i % step == 0]
     num_plots = len(selected)
 
@@ -78,7 +80,7 @@ def plot_similarity_histograms(cossim_matrix_by_layer: List[np.ndarray],
 def plot_similarity_heatmap(cossim_matrix_by_layer: List[np.ndarray],
                             save_path: str = None,
                             step: int = 1,
-                            bins: int = 64):
+                            bins: int = 128):
     selected = [(i, data) for i, data in enumerate(cossim_matrix_by_layer) if i % step == 0]
 
     layer_indices, hist_data = [], []
@@ -251,15 +253,38 @@ def compute_entropy(matrix: np.ndarray, entropy_type: str, num_bins: int = 256):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='parameters')
+    parser.add_argument('--huggingface-id', type=str, default='albert-xlarge-v2')
+    parser.add_argument('--huggingface-token', type=str, default=None)
+    parser.add_argument('--num-attention-heads', type=int, default=None)
+    parser.add_argument('--num-hidden-layers', type=int, default=None)
+    parser.add_argument('--plot-all', action='store_true')
     parser.add_argument('--random-seed', type=int, default=1)
     args = parser.parse_args()
 
     torch.manual_seed(args.random_seed)
 
-    # Load dataset and model.
-    tokenizer = AlbertTokenizer.from_pretrained('albert-xlarge-v2')
-    config = AlbertConfig.from_pretrained("albert-xlarge-v2", num_hidden_layers=48, num_attention_heads=1)
-    model = AlbertModel.from_pretrained("albert-xlarge-v2", config=config)
+    if args.huggingface_token is not None:
+        login(token=args.huggingface_token)
+
+    with tempfile.TemporaryDirectory() as tmp_cache:
+        config_kwargs = {'cache_dir': tmp_cache}
+        if args.num_attention_heads is not None:
+            # NOTE: We cannot change number of attention heads for most models.
+            # ALBERT is an exception.
+            config_kwargs['num_attention_heads'] = args.num_attention_heads
+
+        if args.num_hidden_layers is not None:
+            # NOTE: We cannot change number of layeres for most models.
+            # ALBERT model's attention blocks are identical,
+            # so it can be further stacked without a problem.
+            config_kwargs['num_hidden_layers'] = args.num_hidden_layers
+
+        try:
+            tokenizer = AutoTokenizer.from_pretrained(args.huggingface_id, cache_dir=tmp_cache)
+            config = AutoConfig.from_pretrained(args.huggingface_id, **config_kwargs)
+            model = AutoModel.from_pretrained(args.huggingface_id, config=config, cache_dir=tmp_cache)
+        except Exception as e:
+            print(f"Unable to process model: {args.huggingface_id}. Error occurred: {e}.")
 
     # Run model on a random long input.
     text = get_random_long_text('wikipedia')
@@ -272,21 +297,23 @@ if __name__ == '__main__':
         cossim_matrix_by_layer = compute_cosine_similarities(embeddings_by_layer)
 
     # Plot and save histograms.
-    plot_similarity_histograms(
-        cossim_matrix_by_layer,
-        save_path='../../visualization/transformer/embedding_cossim_histogram_albert_xlarge_v2.png')
-
+    model_name_cleaned = '-'.join(args.huggingface_id.split('/'))
     plot_similarity_heatmap(
         cossim_matrix_by_layer,
-        save_path='../../visualization/transformer/embedding_cossim_heatmap_albert_xlarge_v2.png')
+        save_path=f'../../visualization/transformer/{model_name_cleaned}/embedding_cossim_heatmap_{model_name_cleaned}_heads_{config.num_attention_heads}.png')
 
-    # Plot and save metrics (prob density, entropy, etc.).
-    plot_probability(
-        cossim_matrix_by_layer,
-        save_path='../../visualization/transformer/embedding_cossim_probability_albert_xlarge_v2.png')
-    plot_entropy(
-        cossim_matrix_by_layer,
-        save_path='../../visualization/transformer/embedding_cossim_entropy_albert_xlarge_v2.png')
-    plot_DSE(
-        embeddings_by_layer,
-        save_path='../../visualization/transformer/embedding_DSE_albert_xlarge_v2.png')
+    if args.plot_all:
+        plot_similarity_histograms(
+            cossim_matrix_by_layer,
+            save_path=f'../../visualization/transformer/{model_name_cleaned}/embedding_cossim_histogram_{model_name_cleaned}_heads_{config.num_attention_heads}.png')
+
+        # Plot and save metrics (prob density, entropy, etc.).
+        plot_probability(
+            cossim_matrix_by_layer,
+            save_path=f'../../visualization/transformer/{model_name_cleaned}/embedding_cossim_probability_{model_name_cleaned}.png')
+        plot_entropy(
+            cossim_matrix_by_layer,
+            save_path=f'../../visualization/transformer/{model_name_cleaned}/embedding_cossim_entropy_{model_name_cleaned}.png')
+        plot_DSE(
+            embeddings_by_layer,
+            save_path=f'../../visualization/transformer/{model_name_cleaned}/embedding_DSE_{model_name_cleaned}.png')
