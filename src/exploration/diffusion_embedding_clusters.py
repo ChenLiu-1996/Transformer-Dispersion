@@ -43,7 +43,7 @@ def compute_cosine_similarities(embeddings: List[np.ndarray]) -> List[np.ndarray
     cossim_matrix_by_layer = []
     for z in tqdm(embeddings):
         z = normalize(z, axis=1)
-        cossim_matrix = np.matmul(z, z.T)
+        cossim_matrix = np.matmul(z, z.T).clip(-1, 1)  # Clipping to correct occasional rounding error.
         cossim_matrix_by_layer.append(cossim_matrix)
     return cossim_matrix_by_layer
 

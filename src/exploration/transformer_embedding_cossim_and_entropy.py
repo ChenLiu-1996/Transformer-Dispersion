@@ -28,7 +28,7 @@ def compute_cosine_similarities(embeddings: List[np.ndarray]) -> List[np.ndarray
     cossim_matrix_by_layer = []
     for z in tqdm(embeddings):
         z = normalize(z, axis=1)
-        cossim_matrix = np.matmul(z, z.T)
+        cossim_matrix = np.matmul(z, z.T).clip(-1, 1)  # Clipping to correct occasional rounding error.
         cossim_matrix_by_layer.append(cossim_matrix)
     return cossim_matrix_by_layer
 
@@ -86,7 +86,7 @@ def plot_similarity_heatmap(cossim_matrix_by_layer: List[np.ndarray],
     layer_indices, hist_data = [], []
     for (layer_idx, cossim_matrix) in selected:
         cossim_arr = cossim_matrix.flatten()
-        hist, _ = np.histogram(cossim_arr, bins=bins, density=False, range=(-1, 1))
+        hist, _ = np.histogram(cossim_arr, bins=bins, density=True, range=(-1, 1))
         hist_data.append(hist)
         layer_indices.append(layer_idx)
     hist_matrix = np.array(hist_data)
@@ -103,7 +103,8 @@ def plot_similarity_heatmap(cossim_matrix_by_layer: List[np.ndarray],
     ax.set_xlabel('Cosine Similarity', fontsize=24)
     ax.set_ylabel('Layer', fontsize=24)
 
-    fig.colorbar(im, ax=ax)
+    cbar = fig.colorbar(im, ax=ax)
+    cbar.ax.set_title('Probability\nDensity', fontsize=18, pad=10)
 
     fig.tight_layout(pad=2)
 
@@ -258,10 +259,8 @@ if __name__ == '__main__':
     parser.add_argument('--num-attention-heads', type=int, default=None)
     parser.add_argument('--num-hidden-layers', type=int, default=None)
     parser.add_argument('--plot-all', action='store_true')
-    parser.add_argument('--random-seed', type=int, default=1)
+    parser.add_argument('--repetitions', type=int, default=5)
     args = parser.parse_args()
-
-    torch.manual_seed(args.random_seed)
 
     if args.huggingface_token is not None:
         login(token=args.huggingface_token)
@@ -286,15 +285,31 @@ if __name__ == '__main__':
         except Exception as e:
             print(f"Unable to process model: {args.huggingface_id}. Error occurred: {e}.")
 
-    # Run model on a random long input.
-    text = get_random_long_text('wikipedia')
-    tokens = tokenizer(text, return_tensors='pt', truncation=True)
+    # Extracting the cosine similarity by layer, and average over repetitions.
+    cossim_matrix_by_layer = []
+    for random_seed in range(args.repetitions):
+        torch.manual_seed(random_seed)
 
-    # Extract the cosine similarities among token embeddings (hidden states).
-    with torch.no_grad():
-        output = model(**tokens, output_hidden_states=True)
-        embeddings_by_layer = organize_embeddings(output.hidden_states)
-        cossim_matrix_by_layer = compute_cosine_similarities(embeddings_by_layer)
+        # Run model on a random long input.
+        text = get_random_long_text('wikipedia', random_seed=random_seed)
+        tokens = tokenizer(text, return_tensors='pt', truncation=True)
+
+        # Extract the cosine similarities among token embeddings (hidden states).
+        with torch.no_grad():
+            output = model(**tokens, output_hidden_states=True)
+            embeddings_by_layer = organize_embeddings(output.hidden_states)
+            curr_cossim_matrix_by_layer = compute_cosine_similarities(embeddings_by_layer)
+
+        if random_seed == 0:
+            cossim_matrix_by_layer = [curr_cossim_matrix_by_layer[i][None, ...].clip(-1, 1) for i in range(len(curr_cossim_matrix_by_layer))]
+        else:
+            for i in range(len(cossim_matrix_by_layer)):
+                cossim_matrix_by_layer[i] = np.concatenate((cossim_matrix_by_layer[i],
+                                                            curr_cossim_matrix_by_layer[i][None, ...]),
+                                                           axis=0)
+
+    for i in range(len(cossim_matrix_by_layer)):
+        cossim_matrix_by_layer[i] = cossim_matrix_by_layer[i].mean(axis=0)
 
     # Plot and save histograms.
     model_name_cleaned = '-'.join(args.huggingface_id.split('/'))
