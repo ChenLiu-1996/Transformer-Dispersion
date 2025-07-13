@@ -317,20 +317,20 @@ if __name__ == '__main__':
     model_name_cleaned = '-'.join(args.huggingface_id.split('/'))
     plot_similarity_heatmap(
         cossim_matrix_by_layer,
-        save_path=f'../../visualization/transformer/{model_name_cleaned}/embedding_cossim_heatmap_{model_name_cleaned}_heads_{config.num_attention_heads}.png')
+        save_path=f'../../visualization/transformer/{model_name_cleaned}/embedding_cossim_heatmap_{model_name_cleaned}_layers_{config.num_hidden_layers}_heads_{config.num_attention_heads}.png')
 
     if args.plot_all:
         plot_similarity_histograms(
             cossim_matrix_by_layer,
-            save_path=f'../../visualization/transformer/{model_name_cleaned}/embedding_cossim_histogram_{model_name_cleaned}_heads_{config.num_attention_heads}.png')
+            save_path=f'../../visualization/transformer/{model_name_cleaned}/embedding_cossim_histogram_{model_name_cleaned}_layers_{config.num_hidden_layers}_heads_{config.num_attention_heads}.png')
 
         # Plot and save metrics (prob density, entropy, etc.).
         plot_probability(
             cossim_matrix_by_layer,
-            save_path=f'../../visualization/transformer/{model_name_cleaned}/embedding_cossim_probability_{model_name_cleaned}.png')
+            save_path=f'../../visualization/transformer/{model_name_cleaned}/embedding_cossim_probability_{model_name_cleaned}_layers_{config.num_hidden_layers}_heads_{config.num_attention_heads}.png')
         plot_entropy(
             cossim_matrix_by_layer,
-            save_path=f'../../visualization/transformer/{model_name_cleaned}/embedding_cossim_entropy_{model_name_cleaned}.png')
+            save_path=f'../../visualization/transformer/{model_name_cleaned}/embedding_cossim_entropy_{model_name_cleaned}_layers_{config.num_hidden_layers}_heads_{config.num_attention_heads}.png')
         plot_DSE(
             embeddings_by_layer,
-            save_path=f'../../visualization/transformer/{model_name_cleaned}/embedding_DSE_{model_name_cleaned}.png')
+            save_path=f'../../visualization/transformer/{model_name_cleaned}/embedding_DSE_{model_name_cleaned}_layers_{config.num_hidden_layers}_heads_{config.num_attention_heads}.png')
