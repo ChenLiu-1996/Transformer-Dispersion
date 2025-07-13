@@ -96,7 +96,8 @@ def plot_similarity_heatmap(cossim_matrix_by_layer: List[np.ndarray],
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
 
-    im = ax.imshow(hist_matrix, aspect="auto", origin="lower", cmap='Reds', extent=[-1, 1, 0, layer_indices[-1]])
+    im = ax.imshow(hist_matrix, aspect="auto", origin="lower", cmap='Reds',
+                   extent=[-1, 1, 0, layer_indices[-1]], vmin=0, vmax=10)
 
     ax.tick_params(axis='both', which='major', labelsize=18)
     ax.set_title('Cosine Similarity by Layer', fontsize=28, pad=20)
@@ -104,7 +105,8 @@ def plot_similarity_heatmap(cossim_matrix_by_layer: List[np.ndarray],
     ax.set_ylabel('Layer', fontsize=24)
 
     cbar = fig.colorbar(im, ax=ax)
-    cbar.ax.set_title('Probability\nDensity', fontsize=18, pad=10)
+    cbar.ax.tick_params(axis='both', which='major', labelsize=18)
+    cbar.ax.set_title('Probability\nDensity', fontsize=18, pad=20)
 
     fig.tight_layout(pad=2)
 
@@ -291,8 +293,8 @@ if __name__ == '__main__':
         torch.manual_seed(random_seed)
 
         # Run model on a random long input.
-        text = get_random_long_text('wikipedia', random_seed=random_seed)
-        tokens = tokenizer(text, return_tensors='pt', truncation=True)
+        text = get_random_long_text('wikipedia', random_seed=random_seed, min_word_count=1024, max_word_count=1280)
+        tokens = tokenizer(text, return_tensors='pt', truncation=True, max_length=512)
 
         # Extract the cosine similarities among token embeddings (hidden states).
         with torch.no_grad():
