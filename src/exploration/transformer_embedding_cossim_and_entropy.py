@@ -256,7 +256,8 @@ def compute_entropy(matrix: np.ndarray, entropy_type: str, num_bins: int = 256):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='parameters')
-    parser.add_argument('--huggingface-id', type=str, default='albert-xlarge-v2')
+    parser.add_argument('--tokenizer-id', type=str, default=None)
+    parser.add_argument('--model-id', type=str, default='albert-xlarge-v2')
     parser.add_argument('--huggingface-token', type=str, default=None)
     parser.add_argument('--num-attention-heads', type=int, default=None)
     parser.add_argument('--num-hidden-layers', type=int, default=None)
@@ -280,12 +281,15 @@ if __name__ == '__main__':
             # so it can be further stacked without a problem.
             config_kwargs['num_hidden_layers'] = args.num_hidden_layers
 
+        if args.tokenizer_id is None:
+            args.tokenizer_id = args.model_id
+
         try:
-            tokenizer = AutoTokenizer.from_pretrained(args.huggingface_id, cache_dir=tmp_cache)
-            config = AutoConfig.from_pretrained(args.huggingface_id, **config_kwargs)
-            model = AutoModel.from_pretrained(args.huggingface_id, config=config, cache_dir=tmp_cache)
+            tokenizer = AutoTokenizer.from_pretrained(args.tokenizer_id, cache_dir=tmp_cache)
+            config = AutoConfig.from_pretrained(args.model_id, **config_kwargs)
+            model = AutoModel.from_pretrained(args.model_id, config=config, cache_dir=tmp_cache)
         except Exception as e:
-            print(f"Unable to process model: {args.huggingface_id}. Error occurred: {e}.")
+            print(f"Unable to process model: {args.model_id}. Error occurred: {e}.")
 
     # Extracting the cosine similarity by layer, and average over repetitions.
     cossim_matrix_by_layer = []
@@ -314,7 +318,7 @@ if __name__ == '__main__':
         cossim_matrix_by_layer[i] = cossim_matrix_by_layer[i].mean(axis=0)
 
     # Plot and save histograms.
-    model_name_cleaned = '-'.join(args.huggingface_id.split('/'))
+    model_name_cleaned = '-'.join(args.model_id.split('/'))
     plot_similarity_heatmap(
         cossim_matrix_by_layer,
         save_path=f'../../visualization/transformer/{model_name_cleaned}/embedding_cossim_heatmap_{model_name_cleaned}_layers_{config.num_hidden_layers}_heads_{config.num_attention_heads}.png')
