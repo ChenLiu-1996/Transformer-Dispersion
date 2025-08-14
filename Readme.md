@@ -5,7 +5,7 @@
 
 Under `transformer_dispersion/midtrain_gpt2`
 ```
-python midtrain_gpt2.py
+python midtrain_gpt2_huggingface.py
 ```
 
 
