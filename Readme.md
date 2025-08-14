@@ -3,10 +3,10 @@
 ## Usage
 1. Mid-train GPT2
 
-Under `transformer_dispersion/midtrain_gpt2`
-```
-python midtrain_gpt2_huggingface.py
-```
+    Under `transformer_dispersion/midtrain_gpt2`
+    ```
+    python midtrain_gpt2_huggingface.py
+    ```
 
 
 ## Dependencies
