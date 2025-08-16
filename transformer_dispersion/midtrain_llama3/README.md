@@ -60,9 +60,17 @@ cd $WORK_DIR
 llamafactory-cli chat my/inference_config.yaml 
 ```
 
-Eval
+Eval MMLU
 ```bash
 apptainer shell --nv --bind ${HOST_CA_CERT_PATH}:${CONTAINER_CA_CERT_PATH} --overlay ${OVERLAY_PATH} ${CONTAINER_PATH}
 cd $WORK_DIR
-llamafactory-cli eval my/eval_after_midtraining.yaml 
+llamafactory-cli eval my/mmlu_eval_before_midtraining.yaml 
+llamafactory-cli eval my/mmlu_eval_after_midtraining.yaml 
+```
+
+Eval perplexity
+```bash
+cd $WORK_DIR
+"FORCE_TORCHRUN=1 llamafactory-cli train my/perplexity_llama_wiki_eval_before_midtraining.yaml
+"FORCE_TORCHRUN=1 llamafactory-cli train my/perplexity_llama_wiki_eval_after_midtraining.yaml
 ```
