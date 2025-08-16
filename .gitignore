@@ -13,3 +13,8 @@ data
 # Data
 **/*.npy
 **/*.npz
+
+# local env configs
+env.sh
+
+slurm_out/
