@@ -29,10 +29,12 @@ if [ -z "${WORK_DIR}" ]; then
   exit 1
 fi
 
-if [ -z "${YAML_PATH}" ]; then
-  echo "ERROR: Please set the YAML_PATH environment variable."
-  exit 1
-fi
+YAML_PATH=${WORK_DIR}/my/llama_wiki_pretrain.yaml
+
+# if [ -z "${YAML_PATH}" ]; then
+#   echo "ERROR: Please set the YAML_PATH environment variable."
+#   exit 1
+# fi
 
 if [ -z "${TRITON_CACHE_DIR}" ]; then
   echo "ERROR: Please set the TRITON_CACHE_DIR environment variable."
@@ -59,6 +61,6 @@ srun --chdir=${WORK_DIR} apptainer exec \
     --bind ${HOST_CA_CERT_PATH}:${CONTAINER_CA_CERT_PATH} \
     --overlay ${OVERLAY_PATH}\
     ${CONTAINER_PATH} \
-    bash -c "FORCE_TORCHRUN=1 llamafactory-cli train ${YAML_PATH}/gpt2_wiki_pretrain.yaml"
+    bash -c "FORCE_TORCHRUN=1 llamafactory-cli train ${YAML_PATH}"
 
 echo "Job finished successfully."

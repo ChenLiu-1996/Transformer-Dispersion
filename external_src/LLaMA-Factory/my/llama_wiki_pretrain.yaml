@@ -1,5 +1,6 @@
 ### model
-model_name_or_path: openai-community/gpt2
+model_name_or_path: meta-llama/Llama-3.2-1B
+trust_remote_code: true
 
 ### method
 stage: pt
@@ -8,31 +9,41 @@ do_train: true
 # lora_target: all
 finetuning_type: full
 deepspeed: examples/deepspeed/ds_z3_config.json  # choices: [ds_z0_config.json, ds_z2_config.json, ds_z3_config.json]
+flash_attn: fa2
 
 ### dataset
-dataset: wikipedia_en
-cutoff_len: 1024
-max_samples: 1000
+dataset: wikitext
+template: llama3
+cutoff_len: 8192
+# max_samples: 1000
 overwrite_cache: true
 preprocessing_num_workers: 16
 dataloader_num_workers: 4
 
 ### output
-output_dir: saves/gpt2/full/pretrain
+output_dir: saves/llama/full/midtrain_wikitext
 logging_steps: 10
 save_steps: 500
 plot_loss: true
 overwrite_output_dir: true
 save_only_model: false
 report_to: wandb  # choices: [none, wandb, tensorboard, swanlab, mlflow]
-run_name: gpt2-wiki-pretrain
+run_name: llama-wiki-pretrain
 
 ### train
 per_device_train_batch_size: 1
-gradient_accumulation_steps: 8
+gradient_accumulation_steps: 128
 learning_rate: 1.0e-5
-num_train_epochs: 3.0
+num_train_epochs: 1
 lr_scheduler_type: cosine
-warmup_ratio: 0.1
+warmup_ratio: 0.03
+weight_decay: 0.01
 bf16: true
 ddp_timeout: 180000000
+
+### eval
+# eval_dataset: wikitext
+val_size: 0.01
+per_device_eval_batch_size: 1
+eval_strategy: steps
+eval_steps: 500

@@ -1,0 +1,4 @@
+# model_name_or_path: saves/gpt2/full/pretrain
+model_name_or_path: openai-community/gpt2
+template: default
+infer_backend: huggingface #choices： [huggingface, vllm]

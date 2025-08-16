@@ -18,7 +18,7 @@ apptainer shell --nv --bind ${HOST_CA_CERT_PATH}:${CONTAINER_CA_CERT_PATH} --ove
 note: need to install wandb and log in inside the container.
 
 ## Set up training recipe
-edit yaml: see `gpt2_wiki_pretrain.yaml`
+edit yaml: see `external_src/LLaMA-Factory/my/gpt2_wiki_pretrain.yaml`
 
 
 ## Test
@@ -51,4 +51,18 @@ adjust `pretrain_gpt2.sbatch` based on hardware
 Submit slurm job
 ```bash
 sbatch pretrain_gpt2.sbatch
+```
+
+Infer
+```bash
+apptainer shell --nv --bind ${HOST_CA_CERT_PATH}:${CONTAINER_CA_CERT_PATH} --overlay ${OVERLAY_PATH} ${CONTAINER_PATH}
+cd $WORK_DIR
+llamafactory-cli chat my/inference_config.yaml 
+```
+
+Eval
+```bash
+apptainer shell --nv --bind ${HOST_CA_CERT_PATH}:${CONTAINER_CA_CERT_PATH} --overlay ${OVERLAY_PATH} ${CONTAINER_PATH}
+cd $WORK_DIR
+llamafactory-cli eval my/eval_after_midtraining.yaml 
 ```
