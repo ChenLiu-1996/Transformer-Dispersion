@@ -409,7 +409,7 @@ if __name__ == "__main__":
     ap.add_argument("--output_dir", type=str, default="midtrained-gpt2")
     ap.add_argument("--block_size", type=int, default=None,
                     help="Context length (default: min(1024, tokenizer max)).")
-    ap.add_argument("--per_device_train_batch_size", type=int, default=64)
+    ap.add_argument("--per_device_train_batch_size", type=int, default=32)
     ap.add_argument("--gradient_accumulation_steps", type=int, default=4)
     ap.add_argument("--seed", type=int, default=42)
 
