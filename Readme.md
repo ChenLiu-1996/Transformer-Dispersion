@@ -18,7 +18,7 @@ conda update -n base conda
 conda install -n base conda-libmamba-solver
 conda config --set solver libmamba
 
-conda create --name transformer pytorch==2.1.0 torchvision torchaudio pytorch-cuda=12.1 -c pytorch -c nvidia -c anaconda -c conda-forge -y
+conda create --name transformer pytorch==2.2.0 torchvision torchaudio pytorch-cuda=12.1 -c pytorch -c nvidia -c anaconda -c conda-forge -y
 conda activate transformer
 conda install scikit-learn scikit-image pandas matplotlib seaborn tqdm -c pytorch -c anaconda -c conda-forge -y
 
