@@ -5,7 +5,7 @@
 
     Under `transformer_dispersion/midtrain_gpt2`
     ```
-    python midtrain_gpt2_huggingface.py
+    accelerate launch midtrain_gpt2.py --train_tokens 100_000_000
     ```
 
 
@@ -30,4 +30,8 @@ python -m pip install numpy==1.26
 python -m pip install nltk
 
 python -m pip install -U phate
+python -m pip install trl bitsandbytes
+python -m pip install "transformers==4.46.0"
+python -m pip install -U transformers accelerate
+python -m pip install lm-eval
 ```
