@@ -375,7 +375,7 @@ def main(args):
         "wikitext",
         "text8",
     ]
-    trainer.add_callback(LMEvalCallback(tokenizer, tasks, num_fewshot=5))
+    trainer.add_callback(LMEvalCallback(tokenizer, tasks, log_path=args.log_path, num_fewshot=5))
 
     trainer.train()
     trainer.save_model(args.output_dir)
