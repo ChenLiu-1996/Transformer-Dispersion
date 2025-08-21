@@ -5,7 +5,7 @@
 
     Under `transformer_dispersion/midtrain_gpt2`
     ```
-    accelerate launch midtrain_gpt2.py --train_tokens 100_000_000
+    accelerate launch midtrain_gpt2.py --train_tokens 100_000_000 --output_dir midtrain_gpt2_default
     ```
 
 
