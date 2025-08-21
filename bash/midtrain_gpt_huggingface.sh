@@ -27,5 +27,5 @@ echo "CUDA_VISIBLE_DEVICES=$CUDA_VISIBLE_DEVICES"
 nvidia-smi -L || { echo "No GPUs visible (nvidia-smi failed)"; exit 1; }
 
 cd /gpfs/radev/home/cl2482/project/Transformer-Dispersion/transformer_dispersion/midtrain_gpt2_huggingface
-accelerate launch midtrain_gpt2.py --train_tokens 1_000_000_000
+accelerate launch midtrain_gpt2.py --train_tokens 100_000_000 --output_dir midtrain_gpt2_default
 
