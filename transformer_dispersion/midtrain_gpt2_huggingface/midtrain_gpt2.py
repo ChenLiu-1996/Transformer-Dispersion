@@ -18,6 +18,30 @@ from transformers import (
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 
+def log(s, filepath=None, to_console=True):
+    '''
+    Logs a string to either file or console
+    Arg(s):
+        s : str
+            string to log
+        filepath
+            output filepath for logging
+        to_console : bool
+            log to console
+    '''
+
+    if to_console:
+        print(s)
+
+    if filepath is not None:
+        if not os.path.isdir(os.path.dirname(filepath)):
+            os.makedirs(os.path.dirname(filepath))
+            with open(filepath, 'w+') as o:
+                o.write(s + '\n')
+        else:
+            with open(filepath, 'a+') as o:
+                o.write(s + '\n')
+
 def filter_non_empty(example):
     txt = example.get("text", "")
     return bool(txt and txt.strip())
@@ -96,7 +120,7 @@ def make_splits(dataset_name, dataset_config, hf_token, tokenizer, block_size, s
 class LMEvalCallback(TrainerCallback):
     def __init__(self, tokenizer, tasks, num_fewshot=5,
                  eval_at_begin=True, eval_at_end=True,
-                 every_n_steps=1000):
+                 every_n_steps=None):
         self.tok = tokenizer
         self.tasks = tasks
         self.num_fewshot = num_fewshot
@@ -106,6 +130,12 @@ class LMEvalCallback(TrainerCallback):
         self.has_run_begin = False
 
     def _run_evaluation(self, args, state, model, stage=""):
+        # Only run evaluation on main process in distributed training
+        if hasattr(args, 'local_rank') and args.local_rank != 0:
+            return
+        if hasattr(args, 'process_index') and args.process_index != 0:
+            return
+
         if args.bf16:
             dtype = "bfloat16"
         elif args.fp16:
@@ -113,19 +143,44 @@ class LMEvalCallback(TrainerCallback):
         else:
             dtype = "float32"
 
+        # Handle multi-GPU setup
+        world_size = int(os.environ.get("WORLD_SIZE", "1"))
+
+        # Determine device configuration
+        if torch.cuda.is_available() and world_size > 1:
+            # Multi-GPU setup - use parallelization in lm_eval
+            device_str = "cuda"
+            model_args = f"pretrained={{tmp}},dtype={dtype},parallelize=True"
+        elif torch.cuda.is_available():
+            # Single GPU
+            device = next(model.parameters()).device
+            device_str = f"cuda:{device.index}" if device.index is not None else "cuda:0"
+            model_args = f"pretrained={{tmp}},dtype={dtype}"
+        else:
+            # CPU
+            device_str = "cpu"
+            model_args = f"pretrained={{tmp}},dtype={dtype}"
+
         try:
             with tempfile.TemporaryDirectory() as tmp:
                 stage_str = f" ({stage})" if stage else ""
-                print(f"[LMEval] Running evaluation{stage_str} at step {state.global_step}...")
-                model.save_pretrained(tmp)
+                log(f"[LMEval] Running evaluation{stage_str} at step {state.global_step} (world_size={world_size}, device={device_str})...", filepath=args.log_path)
+
+                # Save model - handle distributed training
+                if hasattr(model, 'module'):
+                    # Model is wrapped (e.g., DDP, FSDP)
+                    model.module.save_pretrained(tmp)
+                else:
+                    model.save_pretrained(tmp)
                 self.tok.save_pretrained(tmp)
 
                 res = simple_evaluate(
                     model="hf",
-                    model_args=f"pretrained={tmp},dtype={dtype}",
+                    model_args=model_args.format(tmp=tmp),
                     tasks=self.tasks,
                     num_fewshot=self.num_fewshot,
                     batch_size="auto",
+                    device=device_str,
                 )
 
                 filename = f"lm_eval_{stage}_{state.global_step}.json" if stage else f"lm_eval_step{state.global_step}.json"
@@ -133,17 +188,17 @@ class LMEvalCallback(TrainerCallback):
                 with open(out, "w") as f:
                     json.dump(res, f, indent=2)
 
-                print(f"[LMEval] Results saved to {out}")
+                log(f"[LMEval] Results saved to {out}", filepath=args.log_path)
 
                 if "results" in res:
                     for task, metrics in res["results"].items():
                         if isinstance(metrics, dict):
                             for metric_name, value in metrics.items():
                                 if isinstance(value, (int, float)):
-                                    print(f"[LMEval] {task}.{metric_name}: {value:.4f}")
+                                    log(f"[LMEval] {task}.{metric_name}: {value:.4f}", filepath=args.log_path)
 
         except Exception as e:
-            print(f"[LMEval] Error during evaluation{stage_str} at step {state.global_step}: {e}")
+            log(f"[LMEval] Error during evaluation{stage_str} at step {state.global_step}: {e}", filepath=args.log_path)
 
     def on_train_begin(self, args, state, control, **kwargs):
         if self.eval_at_begin and not self.has_run_begin:
@@ -259,7 +314,7 @@ def main(args):
     if tokens_per_step <= 0:
         raise ValueError("tokens_per_step computed as 0; check batch size/accumulation/block_size.")
     max_steps = math.ceil(args.train_tokens / tokens_per_step)
-    print(f"Training for {args.train_tokens} tokens, which is {max_steps} steps.")
+    log(f"Training for {args.train_tokens} tokens, which is {max_steps} steps.", filepath=args.log_path)
 
     fp16, bf16 = compute_precision_flags()
 
@@ -296,21 +351,21 @@ def main(args):
         data_collator=data_collator,
     )
 
-    print("=== Mid-training setup ===")
-    print(f"Model: {args.model_name}")
-    print(model.config)
-    print(f"Dataset: {args.dataset_name} ({args.dataset_config})")
-    print(f"Block size: {block_size}")
-    print(f"Per-device batch: {args.per_device_train_batch_size} | Grad accum: {args.gradient_accumulation_steps} | World size: {world_size}")
-    print(f"Token budget: {args.train_tokens} | Tokens/step: {tokens_per_step} | Max steps: {max_steps}")
-    print(f"Precision: {'bf16' if bf16 else ('fp16' if fp16 else 'fp32')}")
+    log("=== Mid-training setup ===", filepath=args.log_path)
+    log(f"Model: {args.model_name}", filepath=args.log_path)
+    log(str(model.config), filepath=args.log_path)
+    log(f"Dataset: {args.dataset_name} ({args.dataset_config})", filepath=args.log_path)
+    log(f"Block size: {block_size}", filepath=args.log_path)
+    log(f"Per-device batch: {args.per_device_train_batch_size} | Grad accum: {args.gradient_accumulation_steps} | World size: {world_size}", filepath=args.log_path)
+    log(f"Token budget: {args.train_tokens} | Tokens/step: {tokens_per_step} | Max steps: {max_steps}", filepath=args.log_path)
+    log(f"Precision: {'bf16' if bf16 else ('fp16' if fp16 else 'fp32')}", filepath=args.log_path)
 
-    print(f"\n\nEvaluation before mid-training.")
+    log(f"\n\nEvaluation before mid-training.", filepath=args.log_path)
     ppl, eval_metrics = eval_perplexity_with_trainer(trainer, lm_val)
     if ppl is not None:
-        print(f"[Eval] Validation Perplexity: {ppl:.3f}")
+        log(f"[Eval] Validation Perplexity: {ppl:.3f}", filepath=args.log_path)
     if eval_metrics:
-        print("[Eval] Raw eval metrics:", eval_metrics)
+        log(f"[Eval] Raw eval metrics: {eval_metrics}", filepath=args.log_path)
 
     tasks = [
         "mmlu",
@@ -319,20 +374,20 @@ def main(args):
         "wikitext",
         "text8",
     ]
-    trainer.add_callback(LMEvalCallback(tokenizer, tasks, num_fewshot=5, every_n_steps=500))
+    trainer.add_callback(LMEvalCallback(tokenizer, tasks, num_fewshot=5))
 
     trainer.train()
     trainer.save_model(args.output_dir)
     tokenizer.save_pretrained(args.output_dir)
 
-    print(f"\n\nEvaluation after mid-training.")
+    log(f"\n\nEvaluation after mid-training.", filepath=args.log_path)
     ppl, eval_metrics = eval_perplexity_with_trainer(trainer, lm_val)
     if ppl is not None:
-        print(f"[Eval] Validation Perplexity: {ppl:.3f}")
+        log(f"[Eval] Validation Perplexity: {ppl:.3f}", filepath=args.log_path)
     if eval_metrics:
-        print("[Eval] Raw eval metrics:", eval_metrics)
+        log(f"[Eval] Raw eval metrics: {eval_metrics}", filepath=args.log_path)
 
-    print(f"Done. Saved to {args.output_dir}")
+    log(f"Done. Saved to {args.output_dir}", filepath=args.log_path)
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description="Mid-train GPT-2 with a token budget.")
@@ -359,4 +414,5 @@ if __name__ == "__main__":
     ap.add_argument("--mmlu_max_samples", type=int, default=1000, help="Cap MMLU eval examples for speed.")
 
     args = ap.parse_args()
+    args.log_path = os.path.join(args.output_dir, 'log.txt')
     main(args)
