@@ -118,11 +118,12 @@ def make_splits(dataset_name, dataset_config, hf_token, tokenizer, block_size, s
     return lm_train, lm_val
 
 class LMEvalCallback(TrainerCallback):
-    def __init__(self, tokenizer, tasks, num_fewshot=5,
+    def __init__(self, tokenizer, tasks, log_path, num_fewshot=5,
                  eval_at_begin=True, eval_at_end=True,
                  every_n_steps=None):
         self.tok = tokenizer
         self.tasks = tasks
+        self.log_path = log_path
         self.num_fewshot = num_fewshot
         self.eval_at_begin = eval_at_begin
         self.eval_at_end = eval_at_end
@@ -131,9 +132,8 @@ class LMEvalCallback(TrainerCallback):
 
     def _run_evaluation(self, args, state, model, stage=""):
         # Only run evaluation on main process in distributed training
-        if hasattr(args, 'local_rank') and args.local_rank != 0:
-            return
-        if hasattr(args, 'process_index') and args.process_index != 0:
+        local_rank = int(os.environ.get("LOCAL_RANK", "0"))
+        if local_rank != 0:
             return
 
         if args.bf16:
@@ -164,7 +164,7 @@ class LMEvalCallback(TrainerCallback):
         try:
             with tempfile.TemporaryDirectory() as tmp:
                 stage_str = f" ({stage})" if stage else ""
-                log(f"[LMEval] Running evaluation{stage_str} at step {state.global_step} (world_size={world_size}, device={device_str})...", filepath=args.log_path)
+                log(f"[LMEval] Running evaluation{stage_str} at step {state.global_step} (world_size={world_size}, device={device_str})...", filepath=self.log_path)
 
                 # Save model - handle distributed training
                 if hasattr(model, 'module'):
@@ -188,17 +188,17 @@ class LMEvalCallback(TrainerCallback):
                 with open(out, "w") as f:
                     json.dump(res, f, indent=2)
 
-                log(f"[LMEval] Results saved to {out}", filepath=args.log_path)
+                log(f"[LMEval] Results saved to {out}", filepath=self.log_path)
 
                 if "results" in res:
                     for task, metrics in res["results"].items():
                         if isinstance(metrics, dict):
                             for metric_name, value in metrics.items():
                                 if isinstance(value, (int, float)):
-                                    log(f"[LMEval] {task}.{metric_name}: {value:.4f}", filepath=args.log_path)
+                                    log(f"[LMEval] {task}.{metric_name}: {value:.4f}", filepath=self.log_path)
 
         except Exception as e:
-            log(f"[LMEval] Error during evaluation{stage_str} at step {state.global_step}: {e}", filepath=args.log_path)
+            log(f"[LMEval] Error during evaluation{stage_str} at step {state.global_step}: {e}", filepath=self.log_path)
 
     def on_train_begin(self, args, state, control, **kwargs):
         if self.eval_at_begin and not self.has_run_begin:
@@ -367,6 +367,7 @@ def main(args):
     if eval_metrics:
         log(f"[Eval] Raw eval metrics: {eval_metrics}", filepath=args.log_path)
 
+    # https://github.com/EleutherAI/lm-evaluation-harness/tree/main/lm_eval/tasks
     tasks = [
         "mmlu",
         "medmcqa",
