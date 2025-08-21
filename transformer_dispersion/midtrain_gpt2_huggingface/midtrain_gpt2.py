@@ -118,13 +118,14 @@ def make_splits(dataset_name, dataset_config, hf_token, tokenizer, block_size, s
     return lm_train, lm_val
 
 class LMEvalCallback(TrainerCallback):
-    def __init__(self, tokenizer, tasks, log_path, num_fewshot=5,
+    def __init__(self, tokenizer, tasks, log_path, num_fewshot=5, max_eval_samples=None,
                  eval_at_begin=True, eval_at_end=True,
                  every_n_steps=None):
         self.tok = tokenizer
         self.tasks = tasks
         self.log_path = log_path
         self.num_fewshot = num_fewshot
+        self.max_eval_samples = max_eval_samples
         self.eval_at_begin = eval_at_begin
         self.eval_at_end = eval_at_end
         self.every_n_steps = every_n_steps
@@ -181,6 +182,7 @@ class LMEvalCallback(TrainerCallback):
                     num_fewshot=self.num_fewshot,
                     batch_size="auto",
                     device=device_str,
+                    limit=self.max_eval_samples,
                 )
 
                 filename = f"lm_eval_{stage}_{state.global_step}.json" if stage else f"lm_eval_step{state.global_step}.json"
@@ -373,9 +375,8 @@ def main(args):
         "medmcqa",
         "lambada",
         "wikitext",
-        "text8",
     ]
-    trainer.add_callback(LMEvalCallback(tokenizer, tasks, log_path=args.log_path, num_fewshot=5))
+    trainer.add_callback(LMEvalCallback(tokenizer, tasks, log_path=args.log_path, num_fewshot=5, max_eval_samples=500))
 
     trainer.train()
     trainer.save_model(args.output_dir)
@@ -408,7 +409,7 @@ if __name__ == "__main__":
     ap.add_argument("--output_dir", type=str, default="midtrained-gpt2")
     ap.add_argument("--block_size", type=int, default=None,
                     help="Context length (default: min(1024, tokenizer max)).")
-    ap.add_argument("--per_device_train_batch_size", type=int, default=16)
+    ap.add_argument("--per_device_train_batch_size", type=int, default=64)
     ap.add_argument("--gradient_accumulation_steps", type=int, default=4)
     ap.add_argument("--seed", type=int, default=42)
 
