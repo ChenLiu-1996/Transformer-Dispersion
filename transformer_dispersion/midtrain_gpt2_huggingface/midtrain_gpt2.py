@@ -183,6 +183,7 @@ class LMEvalCallback(TrainerCallback):
                     batch_size="auto",
                     device=device_str,
                     limit=self.max_eval_samples,
+                    log_samples=False,  # Otherwise, will log individual samples in the JSON.
                 )
 
                 filename = f"lm_eval_{stage}_{state.global_step}.json" if stage else f"lm_eval_step{state.global_step}.json"
