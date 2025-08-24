@@ -4,7 +4,6 @@ import tempfile
 import math
 import argparse
 import torch
-from transformers import TrainerCallback
 from lm_eval import simple_evaluate
 from datasets import load_dataset, concatenate_datasets
 from transformers import (
@@ -13,6 +12,7 @@ from transformers import (
     AutoModelForCausalLM,
     DataCollatorForLanguageModeling,
     Trainer,
+    TrainerCallback,
     TrainingArguments,
 )
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
