@@ -118,9 +118,9 @@ def make_splits(dataset_name, dataset_config, hf_token, tokenizer, block_size, s
     return lm_train, lm_val
 
 class LMEvalCallback(TrainerCallback):
-    def __init__(self, tokenizer, tasks, log_path, num_fewshot=5, max_eval_samples=None,
+    def __init__(self, tokenizer, tasks, log_path, num_fewshot, max_eval_samples=None,
                  eval_at_begin=True, eval_at_end=True,
-                 every_n_steps=None):
+                 every_n_steps=None, save_on_eval=True):
         self.tok = tokenizer
         self.tasks = tasks
         self.log_path = log_path
@@ -129,6 +129,7 @@ class LMEvalCallback(TrainerCallback):
         self.eval_at_begin = eval_at_begin
         self.eval_at_end = eval_at_end
         self.every_n_steps = every_n_steps
+        self.save_on_eval = save_on_eval
         self.has_run_begin = False
 
     def _run_evaluation(self, args, state, model, stage=""):
@@ -200,6 +201,16 @@ class LMEvalCallback(TrainerCallback):
                                 if isinstance(value, (int, float)):
                                     log(f"[LMEval] {task}.{metric_name}: {value:.4f}", filepath=self.log_path)
 
+                if self.save_on_eval:
+                    ckpt_dir = os.path.join(args.output_dir, f"eval_ckpt_{stage or 'interval'}_step{state.global_step}")
+                    os.makedirs(ckpt_dir, exist_ok=True)
+                    if hasattr(model, 'module'):
+                        model.module.save_pretrained(ckpt_dir, save_safetensors=getattr(args, "save_safetensors", True))
+                    else:
+                        model.save_pretrained(ckpt_dir, save_safetensors=getattr(args, "save_safetensors", True))
+                    self.tok.save_pretrained(ckpt_dir)
+                    log(f"[LMEval] Weights saved to {ckpt_dir}", filepath=self.log_path)
+
         except Exception as e:
             log(f"[LMEval] Error during evaluation{stage_str} at step {state.global_step}: {e}", filepath=self.log_path)
 
@@ -261,7 +272,7 @@ class CausalLMLoss(torch.nn.Module):
         self.reduction = reduction
 
     def forward(self, logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
-        # logits: [B, T, V], labels: [B, T]
+        # logits: [B, seq_len, V], labels: [B, seq_len]
         shift_logits = logits[..., :-1, :].contiguous()
         shift_labels = labels[..., 1:].contiguous()
         loss = torch.nn.functional.cross_entropy(
@@ -272,17 +283,114 @@ class CausalLMLoss(torch.nn.Module):
         )
         return loss
 
+class DispersionLoss(torch.nn.Module):
+    '''
+    Variants (exactly as in the table):
+
+      InfoNCE:     log E_{i,j}[ exp( - D(z_i, z_j) / \tau ) ]
+      Hinge:       E_{i,j}[ max(0, margin - D(z_i, z_j))^2 ]
+      Covariance:  \sum_{m,n} Cov_{mn}^2
+
+    Notes:
+      - D is Euclidean distance (L2), not squared.
+      - \tau and margin are kept as internal constants for simplicity.
+    '''
+    def __init__(self, variant: str, tau: float = 1.0, margin: float = 1.0, tiny: float = 1e-9):
+        super().__init__()
+        v = (variant or "").lower()
+        assert v in {"infonce", "hinge", "covariance"}
+        self.variant = v
+        self.tau = float(tau)
+        self.margin = float(margin)
+        self.tiny = tiny
+
+    def forward(self, z: torch.Tensor) -> torch.Tensor:
+        '''
+        z: [N, F] features.
+        '''
+        if z.dim() != 2 or z.size(0) < 2:
+            raise ValueError(f'Invalid shape for DispersionLoss: {z.shape}.')
+
+        if self.variant == "covariance":
+            # \sum_{m,n} Cov_{mn}^2
+            n = z.size(0)
+            zc = z - z.mean(dim=0, keepdim=True)
+            cov = (zc.t() @ zc) / (n - 1)
+            return (cov * cov).sum()
+
+        # pairwise Euclidean distances for all unordered pairs i<j
+        d = torch.pdist(z, p=2)
+
+        if self.variant == "infonce":
+            val = torch.exp(-d / max(self.tau, self.tiny)).mean()
+            return torch.log(val.clamp_min(self.tiny))
+        else:
+            assert self.variant == "hinge"
+            margin = torch.clamp(self.margin - d, min=0.0)
+            return (margin * margin).mean()
+
 class CustomLossTrainer(Trainer):
-    def __init__(self, *args, loss_fn: torch.nn.Module = None, **kwargs):
+    def __init__(self,
+                 *args,
+                 loss_fn: torch.nn.Module,
+                 dispersion: str,
+                 dispersion_coeff: float,
+                 dispersion_loc: str,
+                 **kwargs):
         super().__init__(*args, **kwargs)
-        self.loss_fn = loss_fn or CausalLMLoss()
+        self.loss_fn = loss_fn
+
+        self.use_disp = dispersion is not None and dispersion_coeff > 0.0
+        self.disp_coeff = dispersion_coeff
+        self.disp_loc = dispersion_loc
+
+        if self.use_disp:
+            variant = dispersion.lower()
+            assert variant in {"infonce", "hinge", "covariance"}
+            self._disp_fn = DispersionLoss(variant=variant)
+        else:
+            self._disp_fn = None
+
+    @staticmethod
+    def _token_features(hidden: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+        '''
+        hidden: [B, seq_len, feature], labels: [B, seq_len]
+        Returns token-level features for non-ignored positions: [N_valid, feature]
+        '''
+        mask = (labels != -100)
+        if mask.any():
+            return hidden[mask]
+        # If no valid tokens, return a safe zero (loss=0)
+        return hidden.new_zeros((1, hidden.size(-1)))
+
+    def _dispersion_from_hidden_states(self, hidden_states, labels) -> torch.Tensor:
+        '''
+        hidden_states: tuple of [B, seq_len, feature] with length (layer + 1) for most HF models.
+        labels: [B, seq_len]
+        '''
+        if self.disp_loc == "last":
+            z = self._token_features(hidden_states[-1], labels)
+            return self._disp_fn(z)
+
+        vals = []
+        for h in hidden_states[1:]:
+            z = self._token_features(h, labels)
+            vals.append(self._disp_fn(z))
+        return torch.stack(vals).mean() if vals else labels.new_zeros(())
 
     def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
         labels = inputs["labels"]
-        outputs = model(**inputs)
+        outputs = model(**inputs, output_hidden_states=True)
         logits = outputs.logits
-        loss = self.loss_fn(logits, labels)
-        return (loss, outputs) if return_outputs else loss
+
+        total = self.loss_fn(logits, labels)
+
+        if self.use_disp:
+            disp_val = self._dispersion_from_hidden_states(outputs.hidden_states, labels)
+            total = total + self.disp_coeff * disp_val
+            outputs.dispersion_loss = disp_val.detach()
+
+        return (total, outputs) if return_outputs else total
 
 def main(args):
     if args.hf_token:
@@ -318,6 +426,7 @@ def main(args):
         raise ValueError("tokens_per_step computed as 0; check batch size/accumulation/block_size.")
     max_steps = math.ceil(args.train_tokens / tokens_per_step)
     log(f"Training for {args.train_tokens} tokens, which is {max_steps} steps.", filepath=args.log_path)
+    log_every_n_steps = max_steps // 4
 
     fp16, bf16 = compute_precision_flags()
 
@@ -348,6 +457,10 @@ def main(args):
     trainer = CustomLossTrainer(
         model=model,
         args=training_args,
+        loss_fn=CausalLMLoss(),
+        dispersion=args.dispersion,
+        dispersion_coeff=args.dispersion_coeff,
+        dispersion_loc=args.dispersion_loc,
         train_dataset=lm_train,
         eval_dataset=lm_val,
         tokenizer=tokenizer,
@@ -372,12 +485,17 @@ def main(args):
 
     # https://github.com/EleutherAI/lm-evaluation-harness/tree/main/lm_eval/tasks
     tasks = [
+        "lambada",
+        "llama3",
         "mmlu",
         "medmcqa",
-        "lambada",
         "wikitext",
     ]
-    trainer.add_callback(LMEvalCallback(tokenizer, tasks, log_path=args.log_path, num_fewshot=5, max_eval_samples=500))
+    trainer.add_callback(LMEvalCallback(tokenizer, tasks,
+                                        log_path=args.log_path,
+                                        num_fewshot=args.num_fewshot,
+                                        max_eval_samples=args.max_eval_samples,
+                                        every_n_steps=log_every_n_steps))
 
     trainer.train()
     trainer.save_model(args.output_dir)
@@ -403,19 +521,23 @@ if __name__ == "__main__":
                     help="Dataset config (e.g., wikitext-2-raw-v1).")
     ap.add_argument("--hf_token", type=str, default=None,
                     help="HF token if needed for gated/private datasets.")
-    ap.add_argument("--lr", type=float, default=2e-4, help="Learning rate.")
-    ap.add_argument("--num_workers", type=int, default=0, help="Number of dataloader workers.")
+    ap.add_argument("--lr", type=float, default=1e-4, help="Learning rate.")
     ap.add_argument("--train_tokens", type=int, required=True,
                     help="Total number of tokens to train on (token budget).")
-    ap.add_argument("--output_dir", type=str, default="midtrained-gpt2")
+    ap.add_argument("--dispersion", type=str, default=None, help="Dispersion loss.")
+    ap.add_argument("--dispersion_coeff", type=float, default=1e-1, help="Dispersion loss weight.")
+    ap.add_argument("--dispersion_loc", type=str, default='last', help="Dispersion loss location.")
+    ap.add_argument("--num_fewshot", type=int, default=1, help="Eval num_fewshot.")
+    ap.add_argument("--max_eval_samples", type=int, default=1000, help="Eval max_eval_samples.")
+    ap.add_argument("--num_workers", type=int, default=0, help="Number of dataloader workers.")
     ap.add_argument("--block_size", type=int, default=None,
                     help="Context length (default: min(1024, tokenizer max)).")
     ap.add_argument("--per_device_train_batch_size", type=int, default=32)
     ap.add_argument("--gradient_accumulation_steps", type=int, default=4)
-    ap.add_argument("--seed", type=int, default=42)
-
-    ap.add_argument("--mmlu_max_samples", type=int, default=1000, help="Cap MMLU eval examples for speed.")
+    ap.add_argument("--seed", type=int, default=1)
 
     args = ap.parse_args()
+
+    args.output_dir = f'midtrain_{args.model_name}_{"-".join(args.dataset_name.split("/"))}_lr-{args.lr}_token-{args.train_tokens}_disp-{args.dispersion}-{args.dispersion_coeff}-{args.dispersion_loc}_fewshot-{args.num_fewshot}_maxsample-{args.max_eval_samples}_seed-{args.seed}'
     args.log_path = os.path.join(args.output_dir, 'log.txt')
     main(args)
