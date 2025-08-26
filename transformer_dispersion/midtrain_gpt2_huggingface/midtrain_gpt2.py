@@ -1,7 +1,6 @@
 import os
 import json
 import tempfile
-import numpy as np
 import math
 import argparse
 import torch
@@ -192,7 +191,7 @@ class LMEvalCallback(TrainerCallback):
                     filename = f"lm_eval_{stage}_{state.global_step}.json" if stage else f"lm_eval_step{state.global_step}.json"
                     out = os.path.join(args.output_dir, filename)
                     with open(out, "w") as f:
-                        json.dump(res, f, indent=2)
+                        json.dump({"results": res["results"]}, f, indent=2)
                     log(f"[LMEval] Results saved to {out}", filepath=self.log_path)
 
                     for task, metrics in res["results"].items():
@@ -294,8 +293,10 @@ class DispersionLoss(torch.nn.Module):
     Notes:
       - D is Euclidean distance (L2), not squared.
       - \tau and margin are kept as internal constants for simplicity.
+      - To avoid OOM, pairwise computations are chunked in tiles.
     '''
-    def __init__(self, variant: str, tau: float = 1.0, margin: float = 1.0, tiny: float = 1e-9):
+    def __init__(self, variant: str, tau: float = 1.0, margin: float = 1.0, tiny: float = 1e-9,
+                 block_size: int = 512):
         super().__init__()
         v = (variant or "").lower()
         assert v in {"infonce", "hinge", "covariance"}
@@ -303,31 +304,60 @@ class DispersionLoss(torch.nn.Module):
         self.tau = float(tau)
         self.margin = float(margin)
         self.tiny = tiny
+        self.block_size = int(block_size)
 
     def forward(self, z: torch.Tensor) -> torch.Tensor:
         '''
-        z: [N, F] features.
+        z: [N, feature] features from a **single sequence** (non-ignored tokens only).
         '''
         if z.dim() != 2 or z.size(0) < 2:
-            raise ValueError(f'Invalid shape for DispersionLoss: {z.shape}.')
+            # If fewer than 2 tokens, no pairwise terms; return 0
+            return z.new_zeros(())
 
         if self.variant == "covariance":
-            # \sum_{m,n} Cov_{mn}^2
+            # \sum_{m,n} Cov_{mn}^2   (sample covariance over tokens in the sequence)
             n = z.size(0)
             zc = z - z.mean(dim=0, keepdim=True)
             cov = (zc.t() @ zc) / (n - 1)
             return (cov * cov).sum()
 
-        # pairwise Euclidean distances for all unordered pairs i<j
-        d = torch.pdist(z, p=2)
+        # For InfoNCE / Hinge: compute over all unordered pairs i<j in CHUNKS
+        return self._pairwise_reduced_loss(z)
 
-        if self.variant == "infonce":
-            val = torch.exp(-d / max(self.tau, self.tiny)).mean()
-            return torch.log(val.clamp_min(self.tiny))
-        else:
-            assert self.variant == "hinge"
-            margin = torch.clamp(self.margin - d, min=0.0)
-            return (margin * margin).mean()
+    def _pairwise_reduced_loss(self, z: torch.Tensor) -> torch.Tensor:
+        '''
+        Chunked upper-triangular pairwise reduction to avoid materializing all pairs.
+        '''
+        n = z.size(0)
+        bs = self.block_size
+        total_sum = z.new_zeros(())
+        total_cnt = 0
+
+        for i0 in range(0, n, bs):
+            i1 = min(i0 + bs, n)
+            zi = z[i0:i1]  # [bi, F]
+            for j0 in range(i0, n, bs):
+                j1 = min(j0 + bs, n)
+                zj = z[j0:j1]  # [bj, F]
+
+                # pairwise Euclidean distances for the tile: [bi, bj]
+                d = torch.cdist(zi, zj, p=2)
+
+                if i0 == j0:
+                    # keep only upper triangle without diagonal
+                    tri = torch.triu_indices(d.size(0), d.size(1), offset=1, device=d.device)
+                    d = d[tri[0], tri[1]]
+
+                if self.variant == "infonce":
+                    contrib = torch.exp(-d / max(self.tau, self.tiny)).sum()
+                else:  # 'hinge'
+                    margin = torch.clamp(self.margin - d, min=0.0)
+                    contrib = (margin * margin).sum()
+
+                total_sum = total_sum + contrib
+                total_cnt += d.numel()
+
+        return total_sum / max(total_cnt, 1)
 
 class CustomLossTrainer(Trainer):
     def __init__(self,
@@ -352,31 +382,58 @@ class CustomLossTrainer(Trainer):
             self._disp_fn = None
 
     @staticmethod
-    def _token_features(hidden: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+    def _seq_token_features(hidden: torch.Tensor, labels: torch.Tensor,
+                            max_tokens_per_seq: int = 512):
         '''
         hidden: [B, seq_len, feature], labels: [B, seq_len]
-        Returns token-level features for non-ignored positions: [N_valid, feature]
+        Returns a list of per-sequence token features:
+            [ [n1, feature], [n2, feature], ... ]   (one tensor per example)
+        Only non-ignored tokens are kept per sequence, and each sequence
+        is capped to at most max_tokens_per_seq tokens (uniform subsample) to avoid OOM.
         '''
-        mask = (labels != -100)
-        if mask.any():
-            return hidden[mask]
-        # If no valid tokens, return a safe zero (loss=0)
-        return hidden.new_zeros((1, hidden.size(-1)))
+        B, T, F = hidden.shape
+        feats = []
+        for b in range(B):
+            mask_b = labels[b] != -100
+            if mask_b.any():
+                zb = hidden[b][mask_b]  # [n_b, F]
+                n = zb.size(0)
+                if n > max_tokens_per_seq:
+                    idx = torch.randperm(n, device=zb.device)[:max_tokens_per_seq]
+                    zb = zb.index_select(0, idx)
+                feats.append(zb)
+        if not feats:
+            # If no valid tokens anywhere; return a single dummy so loss=0
+            feats = [hidden.new_zeros((1, F))]
+        return feats
 
     def _dispersion_from_hidden_states(self, hidden_states, labels) -> torch.Tensor:
         '''
         hidden_states: tuple of [B, seq_len, feature] with length (layer + 1) for most HF models.
         labels: [B, seq_len]
-        '''
-        if self.disp_loc == "last":
-            z = self._token_features(hidden_states[-1], labels)
-            return self._disp_fn(z)
 
-        vals = []
+        Computes dispersion **within each sequence** (no cross-sequence pairs),
+        averages over sequences, and if dispersion_loc == "all", also averages over layers.
+        '''
+        def per_layer_loss(h):
+            zs = self._seq_token_features(h, labels)
+            vals = []
+            for z in zs:
+                # z: [n_seq_tokens, feature]; each sequence handled independently
+                if z.size(0) >= 2:
+                    vals.append(self._disp_fn(z))
+            if not vals:
+                return labels.new_zeros(())
+            return torch.stack(vals).mean()
+
+        if self.disp_loc == "last":
+            return per_layer_loss(hidden_states[-1])
+
+        # "all": average across all transformer layers (skip embedding layer at index 0)
+        layer_vals = []
         for h in hidden_states[1:]:
-            z = self._token_features(h, labels)
-            vals.append(self._disp_fn(z))
-        return torch.stack(vals).mean() if vals else labels.new_zeros(())
+            layer_vals.append(per_layer_loss(h))
+        return torch.stack(layer_vals).mean() if layer_vals else labels.new_zeros(())
 
     def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
         labels = inputs["labels"]
