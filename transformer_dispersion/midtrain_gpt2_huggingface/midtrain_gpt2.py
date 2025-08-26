@@ -1,6 +1,7 @@
 import os
 import json
 import tempfile
+import numpy as np
 import math
 import argparse
 import torch
@@ -187,14 +188,13 @@ class LMEvalCallback(TrainerCallback):
                     log_samples=False,  # Otherwise, will log individual samples in the JSON.
                 )
 
-                filename = f"lm_eval_{stage}_{state.global_step}.json" if stage else f"lm_eval_step{state.global_step}.json"
-                out = os.path.join(args.output_dir, filename)
-                with open(out, "w") as f:
-                    json.dump(res, f, indent=2)
-
-                log(f"[LMEval] Results saved to {out}", filepath=self.log_path)
-
                 if "results" in res:
+                    filename = f"lm_eval_{stage}_{state.global_step}.json" if stage else f"lm_eval_step{state.global_step}.json"
+                    out = os.path.join(args.output_dir, filename)
+                    with open(out, "w") as f:
+                        json.dump(res, f, indent=2)
+                    log(f"[LMEval] Results saved to {out}", filepath=self.log_path)
+
                     for task, metrics in res["results"].items():
                         if isinstance(metrics, dict):
                             for metric_name, value in metrics.items():
@@ -380,12 +380,16 @@ class CustomLossTrainer(Trainer):
 
     def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
         labels = inputs["labels"]
-        outputs = model(**inputs, output_hidden_states=True)
+
+        # Use hidden states ONLY if we're training AND dispersion is on.
+        want_disp = self.use_disp and model.training
+        outputs = model(**inputs, output_hidden_states=want_disp)
         logits = outputs.logits
 
         total = self.loss_fn(logits, labels)
 
-        if self.use_disp:
+        # Add dispersion ONLY in training
+        if want_disp:
             disp_val = self._dispersion_from_hidden_states(outputs.hidden_states, labels)
             total = total + self.disp_coeff * disp_val
             outputs.dispersion_loss = disp_val.detach()
@@ -426,7 +430,7 @@ def main(args):
         raise ValueError("tokens_per_step computed as 0; check batch size/accumulation/block_size.")
     max_steps = math.ceil(args.train_tokens / tokens_per_step)
     log(f"Training for {args.train_tokens} tokens, which is {max_steps} steps.", filepath=args.log_path)
-    log_every_n_steps = max_steps // 4
+    log_every_n_steps = max_steps // 3 + 1
 
     fp16, bf16 = compute_precision_flags()
 
@@ -486,7 +490,6 @@ def main(args):
     # https://github.com/EleutherAI/lm-evaluation-harness/tree/main/lm_eval/tasks
     tasks = [
         "lambada",
-        "llama3",
         "mmlu",
         "medmcqa",
         "wikitext",
