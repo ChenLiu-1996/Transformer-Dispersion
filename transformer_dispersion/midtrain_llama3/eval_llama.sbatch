@@ -29,7 +29,7 @@ if [ -z "${WORK_DIR}" ]; then
   exit 1
 fi
 
-YAML_PATH=${WORK_DIR}/my/llama_wiki_pretrain.yaml
+# YAML_PATH=${WORK_DIR}/my/llama_wiki_pretrain.yaml
 
 # if [ -z "${YAML_PATH}" ]; then
 #   echo "ERROR: Please set the YAML_PATH environment variable."
@@ -54,7 +54,9 @@ fi
 export NCCL_DEBUG=INFO
 export PYTHONFAULTHANDLER=1
 
-echo "Starting Apptainer container and executing script..."
+echo "Starting Apptainer container and perplexity evaluation..."
+
+YAML_PATH=${WORK_DIR}/my/perplexity_llama_wiki_eval_after_midtraining.yaml
 
 srun --chdir=${WORK_DIR} apptainer exec \
     --nv \
@@ -62,5 +64,16 @@ srun --chdir=${WORK_DIR} apptainer exec \
     --overlay ${OVERLAY_PATH}\
     ${CONTAINER_PATH} \
     bash -c "FORCE_TORCHRUN=1 llamafactory-cli train ${YAML_PATH}"
+
+YAML_PATH=${WORK_DIR}/my/mmlu_eval_after_midtraining.yaml
+
+echo "Starting MMLU evaluation..."
+
+srun --chdir=${WORK_DIR} apptainer exec \
+    --nv \
+    --bind ${HOST_CA_CERT_PATH}:${CONTAINER_CA_CERT_PATH} \
+    --overlay ${OVERLAY_PATH}\
+    ${CONTAINER_PATH} \
+    bash -c "FORCE_TORCHRUN=1 llamafactory-cli eval ${YAML_PATH}"
 
 echo "Job finished successfully."

@@ -5,30 +5,28 @@ trust_remote_code: true
 ### method
 stage: pt
 do_train: true
-# finetuning_type: lora
-# lora_target: all
 finetuning_type: full
-deepspeed: examples/deepspeed/ds_z3_config.json  # choices: [ds_z0_config.json, ds_z2_config.json, ds_z3_config.json]
+deepspeed: examples/deepspeed/ds_z3_config.json
 flash_attn: fa2
 
 ### dataset
 dataset: wikitext
-# template: llama3 # do not use template for pretraining
-cutoff_len: 8192
-# max_samples: 1000
+# template: llama3
+cutoff_len: 512
+max_samples: 1000
 overwrite_cache: true
 preprocessing_num_workers: 16
 dataloader_num_workers: 4
 
 ### output
-output_dir: saves/llama/full/midtrain_wikitext
-logging_steps: 10
-save_steps: 100
+output_dir: saves/llama/full/midtrain_wikitext_dispersion_test
+logging_steps: 1
+# save_steps: 500
 plot_loss: true
 overwrite_output_dir: true
 save_only_model: false
-report_to: wandb  # choices: [none, wandb, tensorboard, swanlab, mlflow]
-run_name: llama-wiki-pretrain
+report_to: wandb
+run_name: llama-wiki-pretrain-dispersion
 
 ### train
 per_device_train_batch_size: 1
@@ -36,15 +34,19 @@ gradient_accumulation_steps: 128
 learning_rate: 1.0e-5
 num_train_epochs: 5
 lr_scheduler_type: cosine
-# warmup_ratio: 0.03
 warmup_steps: 50
 weight_decay: 0.01
 bf16: true
 ddp_timeout: 180000000
 
 ### eval
-# eval_dataset: wikitext
 val_size: 0.01
 per_device_eval_batch_size: 1
 eval_strategy: steps
-eval_steps: 100
+eval_steps: 5
+
+### dispersion loss
+dispersion: "infonce"  # or "hinge", "covariance"
+dispersion_coeff: 0.1
+dispersion_loc: "last"  # or "all"
+dispersion_eval: true

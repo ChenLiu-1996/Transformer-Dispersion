@@ -29,7 +29,7 @@ if [ -z "${WORK_DIR}" ]; then
   exit 1
 fi
 
-YAML_PATH=${WORK_DIR}/my/llama_wiki_pretrain.yaml
+YAML_PATH=${WORK_DIR}/my/llama_wiki_pretrain_with_dispersion.yaml
 
 # if [ -z "${YAML_PATH}" ]; then
 #   echo "ERROR: Please set the YAML_PATH environment variable."

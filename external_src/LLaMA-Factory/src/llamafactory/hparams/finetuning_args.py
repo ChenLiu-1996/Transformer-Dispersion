@@ -457,6 +457,23 @@ class FinetuningArguments(
         metadata={"help": "Whether or not to compute effective tokens per second."},
     )
 
+    dispersion: Optional[str] = field(
+        default=None,
+        metadata={"help": "Type of dispersion loss to use (infonce, hinge, covariance)."},
+    )
+    dispersion_coeff: float = field(
+        default=0.1,
+        metadata={"help": "Weight coefficient for dispersion loss component."},
+    )
+    dispersion_loc: str = field(
+        default="last",
+        metadata={"help": "Where to apply dispersion loss (last, all)."},
+    )
+    dispersion_eval: bool = field(
+        default=False,
+        metadata={"help": "Whether to compute dispersion loss during evaluation/validation."},
+    )
+
     def __post_init__(self):
         def split_arg(arg):
             if isinstance(arg, str):
