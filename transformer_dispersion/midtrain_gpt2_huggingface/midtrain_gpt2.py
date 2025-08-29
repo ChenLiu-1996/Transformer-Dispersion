@@ -425,7 +425,7 @@ def main(args):
         lr_scheduler_type="cosine",
         logging_steps=max(1, max_steps // 100),
         save_steps=max(50, max_steps // 10),
-        save_total_limit=2,
+        save_strategy="no",  # We will save checkpoints using LMEvalCallback.
         report_to="none",
         seed=args.seed,
         fp16=fp16,
@@ -470,6 +470,7 @@ def main(args):
 
     # https://github.com/EleutherAI/lm-evaluation-harness/tree/main/lm_eval/tasks
     tasks = [
+        "paloma_wikitext_103",
         "lambada",
         "mmlu",
         "medmcqa",
@@ -512,11 +513,11 @@ if __name__ == "__main__":
     ap.add_argument("--dispersion_coeff", type=float, default=1, help="Dispersion loss weight.")
     ap.add_argument("--dispersion_loc", type=str, default='last', help="Dispersion loss location.")
     ap.add_argument("--num_fewshot", type=int, default=1, help="Eval num_fewshot.")
-    ap.add_argument("--max_eval_samples", type=int, default=1000, help="Eval max_eval_samples.")
+    ap.add_argument("--max_eval_samples", type=int, default=200, help="Eval max_eval_samples.")
     ap.add_argument("--num_workers", type=int, default=0, help="Number of dataloader workers.")
     ap.add_argument("--block_size", type=int, default=None,
                     help="Context length (default: min(1024, tokenizer max)).")
-    ap.add_argument("--per_device_train_batch_size", type=int, default=32)
+    ap.add_argument("--per_device_train_batch_size", type=int, default=16)
     ap.add_argument("--gradient_accumulation_steps", type=int, default=4)
     ap.add_argument("--seed", type=int, default=1)
 

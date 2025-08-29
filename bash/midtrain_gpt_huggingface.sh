@@ -1,13 +1,13 @@
 #!/bin/bash
 
-#SBATCH --job-name=m-disp-ab2
+#SBATCH --job-name=m-base
 #SBATCH --partition=gpu
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --gres=gpu:1
 #SBATCH --constraint='h100|a100'
 #SBATCH --cpus-per-task=10
-#SBATCH --time=2-00:00:00
+#SBATCH --time=1-00:00:00
 #SBATCH --mem=80G
 #SBATCH --mail-type=ALL
 
@@ -27,28 +27,30 @@ echo "CUDA_VISIBLE_DEVICES=$CUDA_VISIBLE_DEVICES"
 nvidia-smi -L || { echo "No GPUs visible (nvidia-smi failed)"; exit 1; }
 
 cd /gpfs/radev/home/cl2482/project/Transformer-Dispersion/transformer_dispersion/midtrain_gpt2_huggingface
-accelerate launch midtrain_gpt2.py --train_tokens 200_000_000
+accelerate launch midtrain_gpt2.py --train_tokens 500_000_000
 
-# accelerate launch midtrain_gpt2.py --train_tokens 100_000_000 --dispersion 'InfoNCE_l2' --dispersion_loc 'all'
-# accelerate launch midtrain_gpt2.py --train_tokens 100_000_000 --dispersion 'InfoNCE_cosine' --dispersion_loc 'all'
-# accelerate launch midtrain_gpt2.py --train_tokens 100_000_000 --dispersion 'Hinge' --dispersion_loc 'all'
-# accelerate launch midtrain_gpt2.py --train_tokens 100_000_000 --dispersion 'Covariance' --dispersion_loc 'all'
+# accelerate launch midtrain_gpt2.py --train_tokens 500_000_000 --dispersion 'InfoNCE_l2' --dispersion_loc 'all'
+# accelerate launch midtrain_gpt2.py --train_tokens 500_000_000 --dispersion 'InfoNCE_cosine' --dispersion_loc 'all'
+# accelerate launch midtrain_gpt2.py --train_tokens 500_000_000 --dispersion 'Hinge' --dispersion_loc 'all'
+# accelerate launch midtrain_gpt2.py --train_tokens 500_000_000 --dispersion 'Covariance' --dispersion_loc 'all'
 
-# accelerate launch midtrain_gpt2.py --train_tokens 100_000_000 --dispersion 'InfoNCE' --dispersion_loc 'last'
-# accelerate launch midtrain_gpt2.py --train_tokens 100_000_000 --dispersion 'InfoNCE' --dispersion_loc 'all'
-# accelerate launch midtrain_gpt2.py --train_tokens 100_000_000 --dispersion 'Hinge' --dispersion_loc 'last'
-# accelerate launch midtrain_gpt2.py --train_tokens 100_000_000 --dispersion 'Hinge' --dispersion_loc 'all'
-# accelerate launch midtrain_gpt2.py --train_tokens 100_000_000 --dispersion 'Covariance' --dispersion_loc 'last'
-# accelerate launch midtrain_gpt2.py --train_tokens 100_000_000 --dispersion 'Covariance' --dispersion_loc 'all'
+# accelerate launch midtrain_gpt2.py --train_tokens 500_000_000 --dispersion 'InfoNCE_l2' --dispersion_loc 'last'
+# accelerate launch midtrain_gpt2.py --train_tokens 500_000_000 --dispersion 'InfoNCE_cosine' --dispersion_loc 'last'
+# accelerate launch midtrain_gpt2.py --train_tokens 500_000_000 --dispersion 'Hinge' --dispersion_loc 'last'
+# accelerate launch midtrain_gpt2.py --train_tokens 500_000_000 --dispersion 'Covariance' --dispersion_loc 'last'
 
-# accelerate launch midtrain_gpt2.py --train_tokens 100_000_000 --dispersion 'InfoNCE' --dispersion_loc 'all' --dispersion_coeff 10.0
-# accelerate launch midtrain_gpt2.py --train_tokens 100_000_000 --dispersion 'InfoNCE' --dispersion_loc 'all' --dispersion_coeff 1.0
-# accelerate launch midtrain_gpt2.py --train_tokens 100_000_000 --dispersion 'InfoNCE' --dispersion_loc 'all' --dispersion_coeff 0.01
+# accelerate launch midtrain_gpt2.py --train_tokens 500_000_000 --dispersion 'InfoNCE_l2' --dispersion_loc 'all' --dispersion_coeff 10.0
+# accelerate launch midtrain_gpt2.py --train_tokens 500_000_000 --dispersion 'InfoNCE_l2' --dispersion_loc 'all' --dispersion_coeff 1.0
+# accelerate launch midtrain_gpt2.py --train_tokens 500_000_000 --dispersion 'InfoNCE_l2' --dispersion_loc 'all' --dispersion_coeff 0.01
 
-# accelerate launch midtrain_gpt2.py --train_tokens 100_000_000 --dispersion 'Hinge' --dispersion_loc 'all' --dispersion_coeff 10.0
-# accelerate launch midtrain_gpt2.py --train_tokens 100_000_000 --dispersion 'Hinge' --dispersion_loc 'all' --dispersion_coeff 1.0
-# accelerate launch midtrain_gpt2.py --train_tokens 100_000_000 --dispersion 'Hinge' --dispersion_loc 'all' --dispersion_coeff 0.01
+# accelerate launch midtrain_gpt2.py --train_tokens 500_000_000 --dispersion 'InfoNCE_cosine' --dispersion_loc 'all' --dispersion_coeff 10.0
+# accelerate launch midtrain_gpt2.py --train_tokens 500_000_000 --dispersion 'InfoNCE_cosine' --dispersion_loc 'all' --dispersion_coeff 1.0
+# accelerate launch midtrain_gpt2.py --train_tokens 500_000_000 --dispersion 'InfoNCE_cosine' --dispersion_loc 'all' --dispersion_coeff 0.01
 
-# accelerate launch midtrain_gpt2.py --train_tokens 100_000_000 --dispersion 'Covariance' --dispersion_loc 'all' --dispersion_coeff 10.0
-# accelerate launch midtrain_gpt2.py --train_tokens 100_000_000 --dispersion 'Covariance' --dispersion_loc 'all' --dispersion_coeff 1.0
-# accelerate launch midtrain_gpt2.py --train_tokens 100_000_000 --dispersion 'Covariance' --dispersion_loc 'all' --dispersion_coeff 0.01
+# accelerate launch midtrain_gpt2.py --train_tokens 500_000_000 --dispersion 'Hinge' --dispersion_loc 'all' --dispersion_coeff 10.0
+# accelerate launch midtrain_gpt2.py --train_tokens 500_000_000 --dispersion 'Hinge' --dispersion_loc 'all' --dispersion_coeff 1.0
+# accelerate launch midtrain_gpt2.py --train_tokens 500_000_000 --dispersion 'Hinge' --dispersion_loc 'all' --dispersion_coeff 0.01
+
+# accelerate launch midtrain_gpt2.py --train_tokens 500_000_000 --dispersion 'Covariance' --dispersion_loc 'all' --dispersion_coeff 10.0
+# accelerate launch midtrain_gpt2.py --train_tokens 500_000_000 --dispersion 'Covariance' --dispersion_loc 'all' --dispersion_coeff 1.0
+# accelerate launch midtrain_gpt2.py --train_tokens 500_000_000 --dispersion 'Covariance' --dispersion_loc 'all' --dispersion_coeff 0.01
