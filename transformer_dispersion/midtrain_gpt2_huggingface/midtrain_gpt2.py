@@ -306,31 +306,6 @@ class CustomLossTrainer(Trainer):
             variant = dispersion.lower()
             self.disp_fn = DispersionLoss(variant=variant)
 
-    @staticmethod
-    def _seq_token_features(hidden: torch.Tensor, labels: torch.Tensor,
-                            max_tokens_per_seq: int = 512):
-        '''
-        hidden: [B, seq_len, feature]
-        labels: [B, seq_len]
-        Returns a list of per-sequence token features:
-            [ [n1, feature], [n2, feature], ... ]   (one tensor per example)
-        Only non-ignored tokens are kept per sequence, and each sequence
-        is capped to at most max_tokens_per_seq tokens (uniform subsample) to avoid OOM.
-        '''
-        B, L, F = hidden.shape
-        feats = []
-        for b in range(B):
-            mask_b = labels[b] != -100
-            if mask_b.any():
-                zb = hidden[b][mask_b]  # [n_b, F]
-                n = zb.size(0)
-                if n > max_tokens_per_seq:
-                    idx = torch.randperm(n, device=zb.device)[:max_tokens_per_seq]
-                    zb = zb.index_select(0, idx)
-                feats.append(zb)
-        assert len(feats) > 0
-        return feats
-
     def disperse_layer(self, h: torch.Tensor) -> torch.Tensor:
         '''
         Compute dispersion for a single hidden state tensor h: [B, L, D] after rearranging to z: [B*D, L].
