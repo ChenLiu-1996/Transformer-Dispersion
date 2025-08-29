@@ -481,7 +481,7 @@ if __name__ == "__main__":
                     help="Dataset config (e.g., wikitext-2-raw-v1).")
     ap.add_argument("--hf_token", type=str, default=None,
                     help="HF token if needed for gated/private datasets.")
-    ap.add_argument("--lr", type=float, default=2e-5, help="Learning rate.")
+    ap.add_argument("--lr", type=float, default=5e-5, help="Learning rate.")
     ap.add_argument("--train_tokens", type=int, required=True,
                     help="Total number of tokens to train on (token budget).")
     ap.add_argument("--dispersion", type=str, default=None, help="Dispersion loss.")
@@ -489,12 +489,12 @@ if __name__ == "__main__":
     ap.add_argument("--dispersion_loc", type=str, default='last', help="Dispersion loss location.")
     ap.add_argument("--num_fewshot", type=int, default=1, help="Eval num_fewshot.")
     ap.add_argument("--max_eval_samples", type=int, default=200, help="Eval max_eval_samples.")
-    ap.add_argument("--num_ckpt", type=int, default=9, help="Number of checkpoints.")
+    ap.add_argument("--num_ckpt", type=int, default=5, help="Number of checkpoints.")
     ap.add_argument("--num_workers", type=int, default=8, help="Number of dataloader workers.")
     ap.add_argument("--block_size", type=int, default=None,
                     help="Context length (default: min(1024, tokenizer max)).")
-    ap.add_argument("--per_device_train_batch_size", type=int, default=16)
-    ap.add_argument("--gradient_accumulation_steps", type=int, default=4)
+    ap.add_argument("--per_device_train_batch_size", type=int, default=8)
+    ap.add_argument("--gradient_accumulation_steps", type=int, default=8)
     ap.add_argument("--seed", type=int, default=1)
 
     args = ap.parse_args()
