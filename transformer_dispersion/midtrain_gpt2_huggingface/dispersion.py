@@ -17,8 +17,8 @@ class DispersionLoss(torch.nn.Module):
     '''
     def __init__(self,
                  variant: Literal["infonce_l2", "infonce_cosine", "hinge", "covariance"],
-                 tau_1: float = 10,
-                 tau_2: float = 1.0,
+                 tau_1: float = 50,
+                 tau_2: float = 0.5,
                  margin: float = 0.5,  # 0.5 angular cosine distance = orthogonal.
                  epsilon: float = 1e-4):
         super().__init__()
@@ -122,20 +122,23 @@ if __name__ == '__main__':
     base_loss_fn = CausalLMLoss()
     base_loss = base_loss_fn(out.logits, input_ids)
 
-    # We'll use the last layer activations as z: [B, L, F]
-    # Detach so each test is a fresh leaf tensor
-    z_base = out.hidden_states[-1].detach()
+    # Use all layer activations as z: [B, L, F]
+    # Detach so each test is a fresh leaf tensor.
+    z_base_list = [vec.detach() for vec in out.hidden_states]
 
     # 3) Your exact test loop, but with real hidden states
     for variant in ["covariance", "infonce_l2", "infonce_cosine", "hinge"]:
         print(f"\nVariant: {variant}")
         loss_fn = DispersionLoss(variant=variant)
 
-        # fresh leaf w/ grads each time
-        z = z_base.clone().requires_grad_(True)
-
         print(f"Base loss: {base_loss.item():.3f}")
-        loss = loss_fn(z)
+        loss = 0
+        for z_base in z_base_list:
+            # fresh leaf w/ grads each time
+            z = z_base.clone().requires_grad_(True)
+            loss += loss_fn(z)
+        loss /= len(z_base_list)
         print(f"Dispersion loss: {loss.item():.3f}")
+
         loss.backward()
         print(f"Gradient norm: {torch.norm(z.grad).item():.6f}")
