@@ -345,10 +345,11 @@ class CustomLossTrainer(Trainer):
             disp_loss = torch.zeros_like(default_loss)
             total_loss = default_loss
 
-        self.log({
-            "dispersion_loss": disp_loss.detach().item(),
-            "default_loss": default_loss.detach().item(),
-        })
+        if model.training:
+            self.log({
+                "dispersion_loss": disp_loss.detach().item(),
+                "default_loss": default_loss.detach().item(),
+            })
 
         return (total_loss, outputs) if return_outputs else total_loss
 
@@ -399,8 +400,10 @@ def main(args):
         max_steps=max_steps,
         optim="adamw_torch",
         lr_scheduler_type="cosine",
+        log_level="info",
+        logging_first_step=True,
         logging_steps=max(1, max_steps // 100),
-        save_steps=max(50, max_steps // 10),
+        log_on_each_node=False,
         save_strategy="no",  # We will save checkpoints using LMEvalCallback.
         report_to="none",
         seed=args.seed,
@@ -490,12 +493,12 @@ if __name__ == "__main__":
     ap.add_argument("--dispersion_loc", type=str, default='last', help="Dispersion loss location.")
     ap.add_argument("--num_fewshot", type=int, default=1, help="Eval num_fewshot.")
     ap.add_argument("--max_eval_samples", type=int, default=200, help="Eval max_eval_samples.")
-    ap.add_argument("--num_ckpt", type=int, default=5, help="Number of checkpoints.")
+    ap.add_argument("--num_ckpt", type=int, default=8, help="Number of checkpoints.")
     ap.add_argument("--num_workers", type=int, default=8, help="Number of dataloader workers.")
     ap.add_argument("--block_size", type=int, default=None,
                     help="Context length (default: min(1024, tokenizer max)).")
-    ap.add_argument("--per_device_train_batch_size", type=int, default=8)
-    ap.add_argument("--gradient_accumulation_steps", type=int, default=8)
+    ap.add_argument("--per_device_train_batch_size", type=int, default=16)
+    ap.add_argument("--gradient_accumulation_steps", type=int, default=4)
     ap.add_argument("--seed", type=int, default=1)
 
     args = ap.parse_args()
