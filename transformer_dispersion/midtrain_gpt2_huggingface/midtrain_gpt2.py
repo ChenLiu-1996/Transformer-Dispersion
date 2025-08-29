@@ -318,7 +318,7 @@ class CustomLossTrainer(Trainer):
 
         # Average across transformer layers (skipping embedding layer)
         loss_values = []
-        assert len(hidden_states) > 0
+        assert len(hidden_states) > 1
         for idx, h in enumerate(hidden_states):
             if idx == 0:
                 # skipping embedding layer
@@ -345,11 +345,18 @@ class CustomLossTrainer(Trainer):
             disp_loss = torch.zeros_like(default_loss)
             total_loss = default_loss
 
-        if model.training:
-            self.log({
-                "dispersion_loss": disp_loss.detach().item(),
-                "default_loss": default_loss.detach().item(),
-            })
+        if (model.training and
+            self.state.global_step > 0 and
+            self.state.global_step % self.args.logging_steps == 0):
+
+            custom_losses = {
+                "train/dispersion_loss": disp_loss.detach().item(),
+                "train/default_loss": default_loss.detach().item(),
+                "train/total_loss": total_loss.detach().item(),
+            }
+
+            # Log to trainer's system
+            self.log(custom_losses)
 
         return (total_loss, outputs) if return_outputs else total_loss
 
@@ -401,8 +408,7 @@ def main(args):
         optim="adamw_torch",
         lr_scheduler_type="cosine",
         log_level="info",
-        logging_first_step=True,
-        logging_steps=max(1, max_steps // 100),
+        logging_steps=max(1, max_steps // 20),
         log_on_each_node=False,
         save_strategy="no",  # We will save checkpoints using LMEvalCallback.
         report_to="none",
