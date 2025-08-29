@@ -17,8 +17,8 @@ class DispersionLoss(torch.nn.Module):
     '''
     def __init__(self,
                  variant: Literal["infonce_l2", "infonce_cosine", "hinge", "covariance"],
-                 tau_1: float = 25,
-                 tau_2: float = 0.25,
+                 tau_1: float = 1.0,
+                 tau_2: float = 1.0,
                  margin: float = 0.5,  # 0.5 angular cosine distance = orthogonal.
                  epsilon: float = 1e-4):
         super().__init__()
@@ -49,15 +49,16 @@ class DispersionLoss(torch.nn.Module):
             z_centered = (z - z.mean(dim=2, keepdim=True)) / z.std(dim=2, keepdim=True)
             Cov = torch.matmul(z_centered, rearrange(z_centered, 'b l f -> b f l')) / (F - 1)
             non_diag = ~torch.eye(L, dtype=torch.bool, device=z.device).unsqueeze(0).repeat(B, 1, 1)
-            loss = Cov.pow(2).masked_select(non_diag).mean()
-            return loss
+            return Cov.pow(2).masked_select(non_diag).mean()
 
         elif self.variant == "infonce_l2":
             # NOTE: The distance matrix matrix `D` has shape [B, L, L].
-            D = torch.cdist(z, z, p=2).pow(2) / L
+            z_sq = (z ** 2).sum(dim=2, keepdim=True)
+            D = (z_sq + rearrange(z_sq, 'b l f -> b f l') - 2 * z @ rearrange(z, 'b l f -> b f l')) / F
             non_diag = ~torch.eye(L, dtype=torch.bool, device=z.device)
-            loss_b = torch.exp(-D / self.tau_1).masked_select(non_diag)
-            return torch.log(loss_b.mean() + self.epsilon)
+            logit = - D.masked_select(non_diag) / self.tau_1
+            # NOTE: log-sum-exp trick for `log(mean(exp(logit)))`, only differ by a constant: -log(logit.size(0))
+            return torch.logsumexp(logit + self.epsilon, dim=0)
 
         elif self.variant == "infonce_cosine":
             # NOTE: The distance matrix matrix `D` has shape [B, L, L].
@@ -65,8 +66,9 @@ class DispersionLoss(torch.nn.Module):
             cossim = z_norm @ rearrange(z_norm, 'b l f -> b f l')
             D = torch.arccos(torch.clamp(cossim, self.epsilon, 1 - self.epsilon)) / torch.pi
             non_diag = ~torch.eye(L, dtype=torch.bool, device=z.device)
-            loss = torch.log(torch.exp(-D / self.tau_2).masked_select(non_diag).mean() + self.epsilon)
-            return loss
+            logit = - D.masked_select(non_diag) / self.tau_2
+            # NOTE: log-sum-exp trick for `log(mean(exp(logit)))`, only differ by a constant: -log(logit.size(0))
+            return torch.logsumexp(logit + self.epsilon, dim=0)
 
         else:
             # NOTE: The distance matrix matrix `D` has shape [B, L, L].
@@ -75,8 +77,7 @@ class DispersionLoss(torch.nn.Module):
             D = torch.arccos(torch.clamp(cossim, self.epsilon, 1 - self.epsilon)) / torch.pi
             non_diag = ~torch.eye(L, dtype=torch.bool, device=z.device)
             diff = torch.clamp(self.margin - D, min=0.0)
-            loss = diff.pow(2).masked_select(non_diag).mean()
-            return loss
+            return diff.pow(2).masked_select(non_diag).mean()
 
 
 if __name__ == '__main__':
@@ -99,7 +100,7 @@ if __name__ == '__main__':
     ds = load_dataset("wikitext", "wikitext-2-raw-v1", split="train")
 
     # grab the first non-empty line
-    text = get_random_long_text('wikipedia', min_word_count=1024, max_word_count=1500)
+    text = get_random_long_text('wikipedia', min_word_count=1200, max_word_count=1500)
     enc = tok(
         text,
         return_tensors="pt",
