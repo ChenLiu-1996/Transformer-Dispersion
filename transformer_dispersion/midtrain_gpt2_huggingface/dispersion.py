@@ -1,5 +1,6 @@
 from typing import Literal
 import torch
+from einops import rearrange
 
 
 class DispersionLoss(torch.nn.Module):
@@ -16,8 +17,8 @@ class DispersionLoss(torch.nn.Module):
     '''
     def __init__(self,
                  variant: Literal["infonce_l2", "infonce_cosine", "hinge", "covariance"],
-                 tau_1: float = 100,
-                 tau_2: float = 0.1,
+                 tau_1: float = 500,
+                 tau_2: float = 0.05,
                  margin: float = 1.0):
         super().__init__()
         variant = variant.lower()
@@ -29,48 +30,56 @@ class DispersionLoss(torch.nn.Module):
 
     def forward(self, z: torch.Tensor) -> torch.Tensor:
         '''
-        z: [N, L] tensor. N: sample size. L: sequence length.
+        z: [B, L, F],
+            where B: batch size. L: sequence length. F: feature dimension.
         '''
-        if z.dim() != 2 or z.size(0) < 2:
-            raise ValueError(f'DispersionLoss only supports 2D tensors, but got {z.shape}.')
+        if z.dim() != 3:
+            raise ValueError(f'DispersionLoss only supports 3D [B, L, F]; got {tuple(z.shape)}.')
 
-        N, L = z.shape
+        B, L, F = z.shape
+
+        if F < 2:
+            raise ValueError(f'DispersionLoss expects F >= 2 in [B, L, F]; got {F}.')
 
         if self.variant == "covariance":
-            # NOTE: The covariance matrix `Cov` has shape [L, L].
+            # NOTE: The covariance matrix `Cov` has shape [B, L, L].
             # \sum_{(m,n), m != n} Cov_{mn}^2, after l2-normalization
-            z_norm = (z - z.mean(0)) / z.std(0)
-            Cov = z_norm.T @ z_norm / (N - 1)
-            non_diag_mask = ~torch.eye(L, dtype=torch.bool, device=z.device)
+            z_norm = (z - z.mean(dim=2, keepdim=True)) / z.std(dim=2, keepdim=True)
+            Cov = torch.matmul(z_norm, rearrange(z_norm, 'b l f -> b f l')) / (F - 1)
+            non_diag = ~torch.eye(L, dtype=torch.bool, device=z.device).unsqueeze(0).repeat(B, 1, 1)
             # divide by L to make the loss scale more reasonable.
-            return (Cov ** 2)[non_diag_mask].sum() / L
+            loss_b = (Cov.pow(2) * non_diag).sum(dim=(1, 2)) / L
+            return loss_b.mean()
 
         elif self.variant == "infonce_l2":
-            # NOTE: The distance matrix matrix `D` has shape [N, N].
+            # NOTE: The distance matrix matrix `D` has shape [B, L, L].
             D = torch.cdist(z, z, p=2) ** 2
-            non_diag_mask = ~torch.eye(N, dtype=torch.bool, device=z.device)
-            return torch.log(torch.mean(torch.exp(-D[non_diag_mask] / self.tau_1)))
+            non_diag = ~torch.eye(L, dtype=torch.bool, device=z.device)
+            loss_b = torch.exp(-D / self.tau_1).masked_select(non_diag)
+            return torch.log(loss_b.mean())
 
         elif self.variant == "infonce_cosine":
-            # NOTE: The distance matrix matrix `D` has shape [N, N].
-            D = - z @ z.T / (torch.linalg.norm(z, dim=1) ** 2)
-            non_diag_mask = ~torch.eye(N, dtype=torch.bool, device=z.device)
-            return torch.log(torch.mean(torch.exp(-D[non_diag_mask] / self.tau_2)))
+            # NOTE: The distance matrix matrix `D` has shape [B, L, L].
+            D = - z @ rearrange(z, 'b l f -> b f l') / (torch.linalg.norm(z, dim=2) ** 2).unsqueeze(1).repeat(1, L, 1)
+            non_diag = ~torch.eye(L, dtype=torch.bool, device=z.device)
+            loss_b = torch.exp(-D / self.tau_2).masked_select(non_diag)
+            return torch.log(loss_b.mean())
 
         else:
-            # NOTE: The distance matrix matrix `D` has shape [N, N].
-            D = - z @ z.T / (torch.linalg.norm(z, dim=1) ** 2)
-            non_diag_mask = ~torch.eye(N, dtype=torch.bool, device=z.device)
-            margin = torch.clamp(self.margin - D[non_diag_mask], min=0.0)
+            # NOTE: The distance matrix matrix `D` has shape [B, L, L].
+            D = - z @ rearrange(z, 'b l f -> b f l') / (torch.linalg.norm(z, dim=2) ** 2).unsqueeze(1).repeat(1, L, 1)
+            non_diag = ~torch.eye(L, dtype=torch.bool, device=z.device)
+            residual = torch.clamp(self.margin - D, min=0.0)
             # divide by L to make the loss scale more reasonable.
-            return (margin ** 2).sum() / L
+            loss_b = (residual.pow(2) * non_diag).sum(dim=(1, 2)) / L
+            return loss_b.mean()
 
 
 if __name__ == '__main__':
     for variant in ['covariance', 'infonce_l2', 'infonce_cosine', 'hinge']:
         print(f"Variant: {variant}")
         loss_fn = DispersionLoss(variant=variant)
-        z = torch.randn(128, 2048, requires_grad=True)
+        z = torch.randn(16, 1024, 768, requires_grad=True)
         loss = loss_fn(z)
         print(f"Loss: {loss.item():.3f}")
         loss.backward()

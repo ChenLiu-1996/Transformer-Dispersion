@@ -304,14 +304,7 @@ class CustomLossTrainer(Trainer):
 
         if self.use_disp:
             variant = dispersion.lower()
-            self.disp_fn = DispersionLoss(variant=variant)
-
-    def disperse_layer(self, h: torch.Tensor) -> torch.Tensor:
-        '''
-        Compute dispersion for a single hidden state tensor h: [B, L, D] after rearranging to z: [B*D, L].
-        '''
-        z = rearrange(h, 'b l d -> (b d) l')
-        return self.disp_fn(z)
+            self.disp_loss_fn = DispersionLoss(variant=variant)
 
     def disperse_hidden_states(self, hidden_states: List[torch.Tensor]) -> torch.Tensor:
         '''
@@ -321,7 +314,7 @@ class CustomLossTrainer(Trainer):
         hidden_states: tuple of tensors, each [B, seq_len, feature_dim]
         '''
         if self.disp_loc == "last":
-            return self.disperse_layer(hidden_states[-1])
+            return self.disp_loss_fn(hidden_states[-1])
 
         # Average across transformer layers (skipping embedding layer)
         loss_values = []
@@ -330,7 +323,7 @@ class CustomLossTrainer(Trainer):
             if idx == 0:
                 # skipping embedding layer
                 continue
-            loss_values.append(self.disperse_layer(h))
+            loss_values.append(self.disp_loss_fn(h))
         return torch.stack(loss_values).mean()
 
     def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
@@ -341,15 +334,23 @@ class CustomLossTrainer(Trainer):
         outputs = model(**inputs, output_hidden_states=want_disp)
         logits = outputs.logits
 
-        total = self.loss_fn(logits, labels)
+        default_loss = self.loss_fn(logits, labels)
 
         # Add dispersion ONLY in training
         if want_disp:
-            disp_val = self.disperse_hidden_states(outputs.hidden_states)
-            total = total + self.disp_coeff * disp_val
-            outputs.dispersion_loss = disp_val.detach()
+            disp_loss = self.disperse_hidden_states(outputs.hidden_states)
+            total_loss = default_loss + self.disp_coeff * disp_loss
+            outputs.dispersion_loss = disp_loss.detach()
+        else:
+            disp_loss = torch.zeros_like(default_loss)
+            total_loss = default_loss
 
-        return (total, outputs) if return_outputs else total
+        self.log({
+            "dispersion_loss": disp_loss.detach().item(),
+            "default_loss": default_loss.detach().item(),
+        })
+
+        return (total_loss, outputs) if return_outputs else total_loss
 
 
 def main(args):
