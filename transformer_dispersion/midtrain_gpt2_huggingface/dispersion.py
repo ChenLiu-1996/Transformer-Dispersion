@@ -7,26 +7,26 @@ class DispersionLoss(torch.nn.Module):
     '''
     Variants (exactly as in the table):
 
-      InfoNCE_l2:     log E_{i,j}[exp(-D(z_i, z_j) / \tau_1)], D(z_i, z_j) = pdist(z_i, z_j, p=2)**2
-      InfoNCE_cosine: log E_{i,j}[exp(-D(z_i, z_j) / \tau_2)], D(z_i, z_j) = - z_i z_j / (||z_i|| ||z_j||)
+      InfoNCE_l2:     log E_{i,j}[exp(-D(z_i, z_j) / \tau_l2)], D(z_i, z_j) = pdist(z_i, z_j, p=2)**2
+      InfoNCE_cosine: log E_{i,j}[exp(-D(z_i, z_j) / \tau_cos)], D(z_i, z_j) = - z_i z_j / (||z_i|| ||z_j||)
       Hinge:          E_{i,j}[max(0, margin - D(z_i, z_j))^2]
       Covariance:     \sum_{(m,n), m != n} Cov_{mn}^2, after l2-normalization
 
     Notes:
-      - \tau_1, \tau_2 and margin are kept as internal constants for simplicity.
+      - \tau_l2, \tau_cos and margin are kept as internal constants for simplicity.
     '''
     def __init__(self,
                  variant: Literal["infonce_l2", "infonce_cosine", "hinge", "covariance"],
-                 tau_1: float = 1.0,
-                 tau_2: float = 1.0,
+                 tau_l2: float = 10.0,
+                 tau_cos: float = 0.1,
                  margin: float = 0.5,  # 0.5 angular cosine distance = orthogonal.
                  epsilon: float = 1e-4):
         super().__init__()
         variant = variant.lower()
         assert variant in {"infonce_l2", "infonce_cosine", "hinge", "covariance"}
         self.variant = variant
-        self.tau_1 = float(tau_1)
-        self.tau_2 = float(tau_2)
+        self.tau_1 = float(tau_l2)
+        self.tau_2 = float(tau_cos)
         self.margin = float(margin)
         self.epsilon = float(epsilon)
 
