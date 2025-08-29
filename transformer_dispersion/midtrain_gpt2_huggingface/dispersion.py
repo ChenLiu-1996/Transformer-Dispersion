@@ -17,8 +17,8 @@ class DispersionLoss(torch.nn.Module):
     '''
     def __init__(self,
                  variant: Literal["infonce_l2", "infonce_cosine", "hinge", "covariance"],
-                 tau_1: float = 100,
-                 tau_2: float = 1.0,
+                 tau_1: float = 25,
+                 tau_2: float = 0.25,
                  margin: float = 0.5,  # 0.5 angular cosine distance = orthogonal.
                  epsilon: float = 1e-4):
         super().__init__()
@@ -57,7 +57,7 @@ class DispersionLoss(torch.nn.Module):
             D = torch.cdist(z, z, p=2).pow(2) / L
             non_diag = ~torch.eye(L, dtype=torch.bool, device=z.device)
             loss_b = torch.exp(-D / self.tau_1).masked_select(non_diag)
-            return torch.log(loss_b.mean())
+            return torch.log(loss_b.mean() + self.epsilon)
 
         elif self.variant == "infonce_cosine":
             # NOTE: The distance matrix matrix `D` has shape [B, L, L].
@@ -65,7 +65,7 @@ class DispersionLoss(torch.nn.Module):
             cossim = z_norm @ rearrange(z_norm, 'b l f -> b f l')
             D = torch.arccos(torch.clamp(cossim, self.epsilon, 1 - self.epsilon)) / torch.pi
             non_diag = ~torch.eye(L, dtype=torch.bool, device=z.device)
-            loss = torch.log(torch.exp(-D / self.tau_2).masked_select(non_diag).mean())
+            loss = torch.log(torch.exp(-D / self.tau_2).masked_select(non_diag).mean() + self.epsilon)
             return loss
 
         else:
