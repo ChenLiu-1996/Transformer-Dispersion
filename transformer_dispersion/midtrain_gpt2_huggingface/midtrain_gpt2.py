@@ -1,9 +1,11 @@
+from typing import List
 import os
 import json
 import tempfile
 import math
 import argparse
 import torch
+from einops import rearrange
 from lm_eval import simple_evaluate
 from datasets import load_dataset, concatenate_datasets
 from transformers import (
@@ -15,6 +17,8 @@ from transformers import (
     TrainerCallback,
     TrainingArguments,
 )
+from dispersion import DispersionLoss
+
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 
@@ -282,82 +286,6 @@ class CausalLMLoss(torch.nn.Module):
         )
         return loss
 
-class DispersionLoss(torch.nn.Module):
-    '''
-    Variants (exactly as in the table):
-
-      InfoNCE:     log E_{i,j}[ exp( - D(z_i, z_j) / \tau ) ]
-      Hinge:       E_{i,j}[ max(0, margin - D(z_i, z_j))^2 ]
-      Covariance:  \sum_{m,n} Cov_{mn}^2
-
-    Notes:
-      - D is Euclidean distance (L2), not squared.
-      - \tau and margin are kept as internal constants for simplicity.
-      - To avoid OOM, pairwise computations are chunked in tiles.
-    '''
-    def __init__(self, variant: str, tau: float = 1.0, margin: float = 1.0, tiny: float = 1e-9,
-                 block_size: int = 512):
-        super().__init__()
-        v = (variant or "").lower()
-        assert v in {"infonce", "hinge", "covariance"}
-        self.variant = v
-        self.tau = float(tau)
-        self.margin = float(margin)
-        self.tiny = tiny
-        self.block_size = int(block_size)
-
-    def forward(self, z: torch.Tensor) -> torch.Tensor:
-        '''
-        z: [N, feature] features from a **single sequence** (non-ignored tokens only).
-        '''
-        if z.dim() != 2 or z.size(0) < 2:
-            # If fewer than 2 tokens, no pairwise terms; return 0
-            return z.new_zeros(())
-
-        if self.variant == "covariance":
-            # \sum_{m,n} Cov_{mn}^2   (sample covariance over tokens in the sequence)
-            n = z.size(0)
-            zc = z - z.mean(dim=0, keepdim=True)
-            cov = (zc.t() @ zc) / (n - 1)
-            return (cov * cov).sum()
-
-        # For InfoNCE / Hinge: compute over all unordered pairs i<j in CHUNKS
-        return self._pairwise_reduced_loss(z)
-
-    def _pairwise_reduced_loss(self, z: torch.Tensor) -> torch.Tensor:
-        '''
-        Chunked upper-triangular pairwise reduction to avoid materializing all pairs.
-        '''
-        n = z.size(0)
-        bs = self.block_size
-        total_sum = z.new_zeros(())
-        total_cnt = 0
-
-        for i0 in range(0, n, bs):
-            i1 = min(i0 + bs, n)
-            zi = z[i0:i1]  # [bi, F]
-            for j0 in range(i0, n, bs):
-                j1 = min(j0 + bs, n)
-                zj = z[j0:j1]  # [bj, F]
-
-                # pairwise Euclidean distances for the tile: [bi, bj]
-                d = torch.cdist(zi, zj, p=2)
-
-                if i0 == j0:
-                    # keep only upper triangle without diagonal
-                    tri = torch.triu_indices(d.size(0), d.size(1), offset=1, device=d.device)
-                    d = d[tri[0], tri[1]]
-
-                if self.variant == "infonce":
-                    contrib = torch.exp(-d / max(self.tau, self.tiny)).sum()
-                else:  # 'hinge'
-                    margin = torch.clamp(self.margin - d, min=0.0)
-                    contrib = (margin * margin).sum()
-
-                total_sum = total_sum + contrib
-                total_cnt += d.numel()
-
-        return total_sum / max(total_cnt, 1)
 
 class CustomLossTrainer(Trainer):
     def __init__(self,
@@ -376,22 +304,20 @@ class CustomLossTrainer(Trainer):
 
         if self.use_disp:
             variant = dispersion.lower()
-            assert variant in {"infonce", "hinge", "covariance"}
-            self._disp_fn = DispersionLoss(variant=variant)
-        else:
-            self._disp_fn = None
+            self.disp_fn = DispersionLoss(variant=variant)
 
     @staticmethod
     def _seq_token_features(hidden: torch.Tensor, labels: torch.Tensor,
                             max_tokens_per_seq: int = 512):
         '''
-        hidden: [B, seq_len, feature], labels: [B, seq_len]
+        hidden: [B, seq_len, feature]
+        labels: [B, seq_len]
         Returns a list of per-sequence token features:
             [ [n1, feature], [n2, feature], ... ]   (one tensor per example)
         Only non-ignored tokens are kept per sequence, and each sequence
         is capped to at most max_tokens_per_seq tokens (uniform subsample) to avoid OOM.
         '''
-        B, T, F = hidden.shape
+        B, L, F = hidden.shape
         feats = []
         for b in range(B):
             mask_b = labels[b] != -100
@@ -402,38 +328,35 @@ class CustomLossTrainer(Trainer):
                     idx = torch.randperm(n, device=zb.device)[:max_tokens_per_seq]
                     zb = zb.index_select(0, idx)
                 feats.append(zb)
-        if not feats:
-            # If no valid tokens anywhere; return a single dummy so loss=0
-            feats = [hidden.new_zeros((1, F))]
+        assert len(feats) > 0
         return feats
 
-    def _dispersion_from_hidden_states(self, hidden_states, labels) -> torch.Tensor:
+    def disperse_layer(self, h: torch.Tensor) -> torch.Tensor:
         '''
-        hidden_states: tuple of [B, seq_len, feature] with length (layer + 1) for most HF models.
-        labels: [B, seq_len]
-
-        Computes dispersion **within each sequence** (no cross-sequence pairs),
-        averages over sequences, and if dispersion_loc == "all", also averages over layers.
+        Compute dispersion for a single hidden state tensor h: [B, L, D] after rearranging to z: [B*D, L].
         '''
-        def per_layer_loss(h):
-            zs = self._seq_token_features(h, labels)
-            vals = []
-            for z in zs:
-                # z: [n_seq_tokens, feature]; each sequence handled independently
-                if z.size(0) >= 2:
-                    vals.append(self._disp_fn(z))
-            if not vals:
-                return labels.new_zeros(())
-            return torch.stack(vals).mean()
+        z = rearrange(h, 'b l d -> (b d) l')
+        return self.disp_fn(z)
 
+    def disperse_hidden_states(self, hidden_states: List[torch.Tensor]) -> torch.Tensor:
+        '''
+        Computes dispersion for last layer or averages across all layers (excluding emb layer at index 0),
+        with embeddings rearranged to [num_samples, sequence_length].
+
+        hidden_states: tuple of tensors, each [B, seq_len, feature_dim]
+        '''
         if self.disp_loc == "last":
-            return per_layer_loss(hidden_states[-1])
+            return self.disperse_layer(hidden_states[-1])
 
-        # "all": average across all transformer layers (skip embedding layer at index 0)
-        layer_vals = []
-        for h in hidden_states[1:]:
-            layer_vals.append(per_layer_loss(h))
-        return torch.stack(layer_vals).mean() if layer_vals else labels.new_zeros(())
+        # Average across transformer layers (skipping embedding layer)
+        loss_values = []
+        assert len(hidden_states) > 0
+        for idx, h in enumerate(hidden_states):
+            if idx == 0:
+                # skipping embedding layer
+                continue
+            loss_values.append(self.disperse_layer(h))
+        return torch.stack(loss_values).mean()
 
     def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
         labels = inputs["labels"]
@@ -447,11 +370,12 @@ class CustomLossTrainer(Trainer):
 
         # Add dispersion ONLY in training
         if want_disp:
-            disp_val = self._dispersion_from_hidden_states(outputs.hidden_states, labels)
+            disp_val = self.disperse_hidden_states(outputs.hidden_states)
             total = total + self.disp_coeff * disp_val
             outputs.dispersion_loss = disp_val.detach()
 
         return (total, outputs) if return_outputs else total
+
 
 def main(args):
     if args.hf_token:
@@ -487,7 +411,7 @@ def main(args):
         raise ValueError("tokens_per_step computed as 0; check batch size/accumulation/block_size.")
     max_steps = math.ceil(args.train_tokens / tokens_per_step)
     log(f"Training for {args.train_tokens} tokens, which is {max_steps} steps.", filepath=args.log_path)
-    log_every_n_steps = max_steps // 3 + 1
+    log_every_n_steps = max_steps // 9 + 1
 
     fp16, bf16 = compute_precision_flags()
 
@@ -581,11 +505,11 @@ if __name__ == "__main__":
                     help="Dataset config (e.g., wikitext-2-raw-v1).")
     ap.add_argument("--hf_token", type=str, default=None,
                     help="HF token if needed for gated/private datasets.")
-    ap.add_argument("--lr", type=float, default=1e-4, help="Learning rate.")
+    ap.add_argument("--lr", type=float, default=2e-5, help="Learning rate.")
     ap.add_argument("--train_tokens", type=int, required=True,
                     help="Total number of tokens to train on (token budget).")
     ap.add_argument("--dispersion", type=str, default=None, help="Dispersion loss.")
-    ap.add_argument("--dispersion_coeff", type=float, default=1e-1, help="Dispersion loss weight.")
+    ap.add_argument("--dispersion_coeff", type=float, default=1, help="Dispersion loss weight.")
     ap.add_argument("--dispersion_loc", type=str, default='last', help="Dispersion loss location.")
     ap.add_argument("--num_fewshot", type=int, default=1, help="Eval num_fewshot.")
     ap.add_argument("--max_eval_samples", type=int, default=1000, help="Eval max_eval_samples.")
@@ -598,6 +522,6 @@ if __name__ == "__main__":
 
     args = ap.parse_args()
 
-    args.output_dir = f'midtrain_{args.model_name}_{"-".join(args.dataset_name.split("/"))}_lr-{args.lr}_token-{args.train_tokens}_disp-{args.dispersion}-{args.dispersion_coeff}-{args.dispersion_loc}_fewshot-{args.num_fewshot}_maxsample-{args.max_eval_samples}_seed-{args.seed}'
+    args.output_dir = f'./results/midtrain_{args.model_name}_{"-".join(args.dataset_name.split("/"))}_lr-{args.lr}_token-{args.train_tokens}_disp-{args.dispersion}-{args.dispersion_coeff}-{args.dispersion_loc}_fewshot-{args.num_fewshot}_maxsample-{args.max_eval_samples}_seed-{args.seed}'
     args.log_path = os.path.join(args.output_dir, 'log.txt')
     main(args)
