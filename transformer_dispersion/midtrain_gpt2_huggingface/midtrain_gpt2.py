@@ -411,7 +411,7 @@ def main(args):
         raise ValueError("tokens_per_step computed as 0; check batch size/accumulation/block_size.")
     max_steps = math.ceil(args.train_tokens / tokens_per_step)
     log(f"Training for {args.train_tokens} tokens, which is {max_steps} steps.", filepath=args.log_path)
-    log_every_n_steps = max_steps // 9 + 1
+    log_every_n_steps = max_steps // args.num_ckpt + 1
 
     fp16, bf16 = compute_precision_flags()
 
@@ -514,7 +514,8 @@ if __name__ == "__main__":
     ap.add_argument("--dispersion_loc", type=str, default='last', help="Dispersion loss location.")
     ap.add_argument("--num_fewshot", type=int, default=1, help="Eval num_fewshot.")
     ap.add_argument("--max_eval_samples", type=int, default=200, help="Eval max_eval_samples.")
-    ap.add_argument("--num_workers", type=int, default=0, help="Number of dataloader workers.")
+    ap.add_argument("--num_ckpt", type=int, default=9, help="Number of checkpoints.")
+    ap.add_argument("--num_workers", type=int, default=8, help="Number of dataloader workers.")
     ap.add_argument("--block_size", type=int, default=None,
                     help="Context length (default: min(1024, tokenizer max)).")
     ap.add_argument("--per_device_train_batch_size", type=int, default=16)
